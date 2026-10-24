@@ -33,14 +33,12 @@ export interface Preferences {
   bitrate: "128" | "192" | "256" | "320";
   sampleRate: "source" | "44100" | "48000" | "96000";
   bitDepth: "16" | "24";
-  resolverUrl: string;
 }
 export const defaults: Preferences = {
   format: "original",
   bitrate: "320",
   sampleRate: "source",
   bitDepth: "16",
-  resolverUrl: "",
 };
 export const formats: { value: Format; label: string; note: string }[] = [
   { value: "original", label: "Original", note: "Fastest · no conversion" },
@@ -197,7 +195,6 @@ export function readPreferences(value: string | null): Preferences {
       bitDepth: ["16", "24"].includes(p.bitDepth)
         ? p.bitDepth
         : defaults.bitDepth,
-      resolverUrl: typeof p.resolverUrl === "string" ? p.resolverUrl : "",
     };
   } catch {
     return defaults;

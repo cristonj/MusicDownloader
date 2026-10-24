@@ -7,18 +7,6 @@ import {
   type Track,
 } from "./model";
 
-export class ResolverRequiredError extends Error {}
-export function resolverBase(value: string): string {
-  const url = parseUrl(value);
-  if (
-    url.protocol !== "https:" &&
-    !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
-  )
-    throw new Error("Resolver must use HTTPS, or localhost for development.");
-  if (url.search || url.hash)
-    throw new Error("Use a resolver URL without a query or fragment.");
-  return url.href.replace(/\/$/, "");
-}
 export function localTrack(file: File): Track {
   if (file.size > MAX_FILE_BYTES)
     throw new Error(`${file.name} is over the 150 MB per-track limit.`);
@@ -41,7 +29,6 @@ export function localTrack(file: File): Track {
 }
 export async function resolveLink(
   input: string,
-  resolver: string,
   signal: AbortSignal,
 ): Promise<{ title: string; tracks: Track[] }> {
   const url = parseUrl(input);
@@ -71,57 +58,78 @@ export async function resolveLink(
       ],
     };
   }
-  if (!resolver)
-    throw new ResolverRequiredError(
-      "Connect a resolver to import service links. Local files and direct audio links work without one.",
-    );
-  const base = resolverBase(resolver);
-  const response = await fetch(`${base}/resolve`, {
+  const response = await fetch("/api/resolve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url: url.href }),
     signal,
-    credentials: "omit",
   });
   const result = await response.json().catch(() => null);
   if (!response.ok)
     throw new Error(
-      typeof result?.detail === "string"
-        ? result.detail
-        : "The source could not be opened. Try again or import a file.",
+      result?.detail || "This source could not be opened. Try another link.",
     );
   if (!result || !Array.isArray(result.tracks) || !result.tracks.length)
     throw new Error("This link has no downloadable tracks.");
   if (result.tracks.length > MAX_TRACKS)
     throw new Error(`Import up to ${MAX_TRACKS} tracks at a time.`);
+  // Each Spotify match has its own short server invocation. Large playlists do
+  // not need one long-running function or background service.
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, result.tracks.length) }, async () => {
+      while (next < result.tracks.length) {
+        const index = next++,
+          item = result.tracks[index];
+        if (typeof item.matchTicket !== "string") continue;
+        try {
+          const response = await fetch("/api/match", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ticket: item.matchTicket }),
+            signal,
+          });
+          const matched = await response.json();
+          result.tracks[index] = {
+            ...item,
+            ...(response.ok
+              ? matched
+              : { error: matched.detail || "No audio match found." }),
+          };
+        } catch (error) {
+          if (signal.aborted) throw error;
+          result.tracks[index] = {
+            ...item,
+            error: "Matching is temporarily unavailable. Re-import this track.",
+          };
+        }
+      }
+    }),
+  );
   const tracks: Track[] = result.tracks.map((item: Record<string, unknown>) => {
     if (
       typeof item.title !== "string" ||
       (typeof item.mediaUrl !== "string" && typeof item.error !== "string")
     )
-      throw new Error("The resolver returned an invalid track.");
-    const media =
-      typeof item.mediaUrl === "string"
-        ? parseUrl(new URL(item.mediaUrl, `${base}/`).href)
-        : undefined;
+      throw new Error("The source returned an invalid track.");
     if (
-      media &&
-      media.protocol !== "https:" &&
-      media.origin !== new URL(base).origin
+      item.mediaUrl &&
+      (typeof item.mediaUrl !== "string" ||
+        !item.mediaUrl.startsWith("/api/audio?ticket="))
     )
-      throw new Error("The resolver returned an insecure media URL.");
+      throw new Error("The source returned an invalid download link.");
     return {
       id: crypto.randomUUID(),
       title: item.title.slice(0, 300),
       artist: typeof item.artist === "string" ? item.artist.slice(0, 200) : "",
       duration: typeof item.duration === "number" ? item.duration : undefined,
       provider,
-      mediaUrl: media?.href,
+      mediaUrl: typeof item.mediaUrl === "string" ? item.mediaUrl : undefined,
       extension:
         typeof item.extension === "string" &&
         /^[a-z0-9]{1,5}$/.test(item.extension)
           ? item.extension
-          : "webm",
+          : "m4a",
       sourceUrl:
         typeof item.sourceUrl === "string" &&
         providerFor(parseUrl(item.sourceUrl)) === "YouTube"
@@ -147,7 +155,166 @@ export async function resolveLink(
     tracks,
   };
 }
+export interface AudioInput {
+  blob: Blob;
+  extension: string;
+  remuxTo?: string;
+}
 export async function fetchAudio(
+  track: Track,
+  signal: AbortSignal,
+  onProgress: (progress: number) => void,
+): Promise<AudioInput> {
+  if (!track.mediaUrl?.startsWith("/api/audio?ticket="))
+    return fetchDirectAudio(track, signal, onProgress);
+  const response = await fetch(track.mediaUrl, { signal });
+  const manifest = await response.json().catch(() => null);
+  if (!response.ok)
+    throw new Error(
+      manifest?.detail || "This audio is unavailable. Re-import the source.",
+    );
+  if (
+    !manifest ||
+    !Array.isArray(manifest.parts) ||
+    !manifest.parts.length ||
+    manifest.parts.length > 3000 ||
+    !/^[a-z0-9]{1,5}$/.test(manifest.extension)
+  )
+    throw new Error("This source returned an invalid audio stream.");
+  const controller = new AbortController(),
+    combined = AbortSignal.any([signal, controller.signal]);
+  const chunkSize = 2 * 1024 * 1024;
+  const pieces: Uint8Array<ArrayBuffer>[][] = new Array(manifest.parts.length);
+  let next = 0,
+    received = 0,
+    complete = 0;
+  async function readRange(part: string, offset: number) {
+    const response = await fetch(part, {
+      signal: combined,
+      headers: { Range: `bytes=${offset}-${offset + chunkSize - 1}` },
+    });
+    if (response.status === 416 && offset > 0)
+      return {
+        bytes: [] as Uint8Array<ArrayBuffer>[],
+        count: 0,
+        total: offset,
+        more: false,
+      };
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      throw new Error(
+        error?.detail || "This audio source expired. Import it again.",
+      );
+    }
+    const range = response.headers
+      .get("content-range")
+      ?.match(/^bytes (\d+)-(\d+)\/(\d+|\*)$/);
+    if (
+      response.status !== 206 ||
+      !range ||
+      Number(range[1]) !== offset ||
+      !response.body
+    )
+      throw new Error("The source returned an invalid audio range.");
+    const total = range[3] === "*" ? 0 : Number(range[3]);
+    if (total > MAX_FILE_BYTES)
+      throw new Error("This track exceeds the browser download limit.");
+    const reader = response.body.getReader(),
+      bytes: Uint8Array<ArrayBuffer>[] = [];
+    let count = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        count += value.length;
+        received += value.length;
+        if (count > chunkSize || received > MAX_FILE_BYTES)
+          throw new Error("This track exceeds the browser download limit.");
+        bytes.push(value);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => {});
+      throw error;
+    }
+    if (!count || count !== Number(range[2]) - offset + 1)
+      throw new Error("The audio transfer was interrupted. Try again.");
+    onProgress(
+      manifest.parts.length === 1 && total
+        ? received / total
+        : complete / manifest.parts.length,
+    );
+    return {
+      bytes,
+      count,
+      total,
+      more: response.headers.get("X-Audio-More") === "1",
+    };
+  }
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(3, manifest.parts.length) }, async () => {
+        while (next < manifest.parts.length) {
+          const index = next++,
+            part = manifest.parts[index];
+          if (
+            typeof part !== "string" ||
+            !part.startsWith("/api/media?ticket=")
+          )
+            throw new Error("Invalid audio segment.");
+          const first = await readRange(part, 0);
+          const chunks: Uint8Array<ArrayBuffer>[][] = [first.bytes];
+          if (first.more && first.total) {
+            const starts = Array.from(
+              { length: Math.ceil((first.total - first.count) / chunkSize) },
+              (_, i) => first.count + i * chunkSize,
+            );
+            let cursor = 0;
+            await Promise.all(
+              Array.from({ length: Math.min(3, starts.length) }, async () => {
+                while (cursor < starts.length) {
+                  const index = cursor++;
+                  const result = await readRange(part, starts[index]);
+                  if (
+                    result.total !== first.total ||
+                    result.count !==
+                      Math.min(chunkSize, first.total - starts[index])
+                  )
+                    throw new Error(
+                      "The audio transfer was interrupted. Try again.",
+                    );
+                  chunks[index + 1] = result.bytes;
+                }
+              }),
+            );
+          } else if (first.more) {
+            let offset = first.count;
+            while (true) {
+              const result = await readRange(part, offset);
+              chunks.push(result.bytes);
+              offset += result.count;
+              if (!result.more) break;
+            }
+          }
+          pieces[index] = chunks.flat();
+          complete++;
+          onProgress(complete / manifest.parts.length);
+        }
+      }),
+    );
+  } catch (error) {
+    controller.abort();
+    throw error;
+  }
+  if (!received) throw new Error("The source returned an empty file.");
+  return {
+    blob: new Blob(pieces.flat()),
+    extension: manifest.extension,
+    remuxTo: ["m4a", "mp3", "opus"].includes(manifest.remuxTo)
+      ? manifest.remuxTo
+      : undefined,
+  };
+}
+async function fetchDirectAudio(
   track: Track,
   signal: AbortSignal,
   onProgress: (progress: number) => void,

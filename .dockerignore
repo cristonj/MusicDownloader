@@ -8,3 +8,5 @@ public/ffmpeg
 test-results
 playwright-report
 .env*
+.server
+.netlify

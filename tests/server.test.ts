@@ -1,0 +1,242 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  allowedMedia,
+  allowedSource,
+  guardRequest,
+  HttpError,
+  readTicket,
+  signTicket,
+} from "../src/server/security";
+import { matchScore } from "../src/server/catalog";
+import { CHUNK_BYTES, hlsManifest, mediaChunk } from "../src/server/media";
+import { mediaFetch } from "../src/server/upstream";
+import { extract } from "../src/server/extractor";
+import { POST as resolve } from "../src/app/api/resolve/route";
+import { GET as audio } from "../src/app/api/audio/route";
+import { GET as media } from "../src/app/api/media/route";
+vi.mock("../src/server/upstream", () => ({
+  mediaFetch: vi.fn(),
+  publicFetch: vi.fn(),
+}));
+vi.mock("../src/server/extractor", () => ({ extract: vi.fn() }));
+afterEach(() => vi.resetAllMocks());
+
+describe("private server endpoints", () => {
+  it("rejects lookalikes, credentials, ports, and arbitrary CDN proxy targets", () => {
+    for (const url of [
+      "http://youtube.com/watch?v=x",
+      "https://youtube.com.attacker.test/x",
+      "https://user:pass@youtube.com/x",
+      "https://youtube.com:123/x",
+    ])
+      expect(() => allowedSource(url)).toThrow();
+    expect(
+      allowedSource("https://artist.bandcamp.com/album/test").hostname,
+    ).toBe("artist.bandcamp.com");
+    for (const url of [
+      "https://localhost/file.mp3",
+      "https://attacker.test/file.mp3",
+      "https://googlevideo.com.attacker.test/file",
+    ])
+      expect(() => allowedMedia(url)).toThrow();
+    expect(
+      allowedMedia("https://r1.googlevideo.com/videoplayback").protocol,
+    ).toBe("https:");
+  });
+  it("signs typed expiring tickets without a configured secret", () => {
+    const token = signTicket({
+      kind: "source",
+      url: "https://www.youtube.com/watch?v=abcdefghijk",
+    });
+    expect(readTicket(token, "source").url).toContain("youtube.com");
+    expect(() => readTicket(token + "x", "source")).toThrow();
+    expect(() => readTicket(token, "media")).toThrow();
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2 * 60 * 60 * 1000);
+    expect(() => readTicket(token, "source")).toThrow("expired");
+    vi.restoreAllMocks();
+  });
+  it("rejects cross-origin calls and oversized requests before extraction", async () => {
+    const forbidden = await resolve(
+      new Request("http://localhost/api/resolve", {
+        method: "POST",
+        headers: { Origin: "https://other.test" },
+        body: "{}",
+      }),
+    );
+    expect(forbidden.status).toBe(403);
+    const tooLarge = await resolve(
+      new Request("http://localhost/api/resolve", {
+        method: "POST",
+        body: "x".repeat(9000),
+      }),
+    );
+    expect(tooLarge.status).toBe(413);
+    expect(extract).not.toHaveBeenCalled();
+  });
+  it("resolves a public source through the same app with no resolver URL", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      title: "A song",
+      webpage_url: "https://www.youtube.com/watch?v=abcdefghijk",
+      ext: "m4a",
+    });
+    const response = await resolve(
+      new Request("http://localhost/api/resolve", {
+        method: "POST",
+        body: JSON.stringify({
+          url: "https://www.youtube.com/watch?v=abcdefghijk",
+        }),
+      }),
+    );
+    const result = await response.json();
+    expect(response.status).toBe(200);
+    expect(result.tracks[0].mediaUrl).toMatch(/^\/api\/audio\?ticket=/);
+    expect(result.tracks[0].title).toBe("A song");
+  });
+  it("opens a source only when its signed audio endpoint is requested", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      url: "https://r1.googlevideo.com/audio",
+      ext: "m4a",
+      protocol: "https",
+      http_headers: { "User-Agent": "test", Cookie: "never-forward" },
+    });
+    const token = signTicket({
+      kind: "source",
+      url: "https://youtube.com/watch?v=abcdefghijk",
+    });
+    const response = await audio(
+      new Request(`http://localhost/api/audio?ticket=${token}`),
+    );
+    const result = await response.json();
+    expect(result.extension).toBe("m4a");
+    expect(result.parts).toHaveLength(1);
+    const ticket = readTicket(
+      new URL(result.parts[0], "http://localhost").searchParams.get("ticket")!,
+      "media",
+    );
+    expect(ticket.headers).toEqual({ "User-Agent": "test" });
+  });
+  it("prefers matching recordings over covers and live versions", () => {
+    expect(
+      matchScore("My Song", "An Artist", 200, {
+        title: "An Artist - My Song (Official Audio)",
+        duration: 200,
+      }),
+    ).toBeGreaterThan(0.9);
+    expect(
+      matchScore("My Song", "An Artist", 200, {
+        title: "Other Artist - My Song (Live Cover)",
+        duration: 200,
+      }),
+    ).toBeLessThan(0.58);
+  });
+});
+
+describe("bounded audio transport", () => {
+  const ticket = {
+    kind: "media" as const,
+    url: "https://r1.googlevideo.com/audio",
+    headers: {},
+  };
+  it("transfers a large file as exact bounded ranges", async () => {
+    const source = new Uint8Array(CHUNK_BYTES + 19);
+    source.fill(123);
+    vi.mocked(mediaFetch).mockImplementation(async (_url, headers) => {
+      const range = headers.Range.match(/bytes=(\d+)-(\d+)/)!;
+      const start = Number(range[1]),
+        end = Math.min(Number(range[2]), source.length - 1);
+      return new Response(source.slice(start, end + 1), {
+        status: 206,
+        headers: {
+          "Content-Type": "audio/mp4",
+          "Content-Range": `bytes ${start}-${end}/${source.length}`,
+        },
+      });
+    });
+    const first = await mediaChunk(ticket, `bytes=0-${CHUNK_BYTES * 10}`);
+    const last = await mediaChunk(
+      ticket,
+      `bytes=${CHUNK_BYTES}-${CHUNK_BYTES * 2 - 1}`,
+    );
+    expect(first.body.length).toBe(CHUNK_BYTES);
+    expect(first.more).toBe(true);
+    expect(last.body.length).toBe(19);
+    expect(last.more).toBe(false);
+    expect(Buffer.concat([first.body, last.body]).equals(Buffer.from(source))).toBe(true);
+  });
+  it("does not trust upstream ranges or pages disguised as media", async () => {
+    vi.mocked(mediaFetch).mockResolvedValueOnce(
+      new Response("abc", {
+        status: 206,
+        headers: {
+          "Content-Type": "audio/mp4",
+          "Content-Range": "bytes 99-101/200",
+        },
+      }),
+    );
+    await expect(mediaChunk(ticket, "bytes=0-2")).rejects.toThrow(
+      "invalid audio range",
+    );
+    vi.mocked(mediaFetch).mockResolvedValueOnce(
+      new Response("<html/>", { headers: { "Content-Type": "text/html" } }),
+    );
+    await expect(mediaChunk(ticket, null)).rejects.toThrow(
+      "page instead of audio",
+    );
+  });
+  it("supports a range-ignoring upstream while bounding each response", async () => {
+    const bytes = new Uint8Array(CHUNK_BYTES + 25);
+    bytes.fill(4);
+    vi.mocked(mediaFetch).mockImplementation(
+      async () =>
+        new Response(bytes, {
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Content-Length": String(bytes.length),
+          },
+        }),
+    );
+    const response = await mediaChunk(
+      ticket,
+      `bytes=${CHUNK_BYTES}-${CHUNK_BYTES * 2 - 1}`,
+    );
+    expect(response.body.length).toBe(25);
+    expect(response.more).toBe(false);
+  });
+  it("signs HLS segments in order including init and byte-range data", async () => {
+    vi.mocked(mediaFetch).mockResolvedValue(
+      new Response(
+        '#EXTM3U\n#EXT-X-MAP:URI="init.mp4",BYTERANGE="10@0"\n#EXT-X-BYTERANGE:20@10\naudio.mp4\n#EXT-X-ENDLIST',
+      ),
+    );
+    const result = await hlsManifest(
+      "https://cf-media.sndcdn.com/list.m3u8",
+      {},
+    );
+    expect(result.remuxTo).toBe("m4a");
+    expect(result.parts).toHaveLength(2);
+    const second = readTicket(
+      new URL(result.parts[1], "http://localhost").searchParams.get("ticket")!,
+      "media",
+    );
+    expect(second.url).toBe("https://cf-media.sndcdn.com/audio.mp4");
+    expect(second.range).toEqual([10, 29]);
+  });
+  it("rejects encrypted/live HLS and malformed ticket requests", async () => {
+    vi.mocked(mediaFetch).mockResolvedValueOnce(
+      new Response(
+        '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\na.ts\n#EXT-X-ENDLIST',
+      ),
+    );
+    await expect(
+      hlsManifest("https://cf-media.sndcdn.com/list.m3u8", {}),
+    ).rejects.toThrow("encrypted");
+    vi.mocked(mediaFetch).mockResolvedValueOnce(new Response("#EXTM3U\na.ts"));
+    await expect(
+      hlsManifest("https://cf-media.sndcdn.com/list.m3u8", {}),
+    ).rejects.toThrow("Live");
+    expect(
+      (await media(new Request("http://localhost/api/media?ticket=bad")))
+        .status,
+    ).toBe(403);
+  });
+});

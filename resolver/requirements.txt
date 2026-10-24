@@ -1,6 +1,0 @@
-fastapi==0.135.1
-uvicorn[standard]==0.42.0
-yt-dlp[default]==2026.10.21
-spotipyFree==1.9.14
-httpx==0.28.1
-redis==6.4.0

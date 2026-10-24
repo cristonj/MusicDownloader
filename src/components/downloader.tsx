@@ -31,7 +31,6 @@ import {
   type Provider,
   type Track,
 } from "@/lib/model";
-import { resolverBase } from "@/lib/sources";
 import { useLibrary } from "./use-library";
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -116,8 +115,6 @@ export default function Downloader() {
   const [dragging, setDragging] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [connectionState, setConnectionState] = useState("");
-  const [testingConnection, setTestingConnection] = useState(false);
   const files = useRef<HTMLInputElement>(null);
   const linkInput = useRef<HTMLInputElement>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -232,30 +229,6 @@ export default function Downloader() {
     } catch {
       library.notify("Paste a link into the field with Ctrl+V or ⌘V.");
       linkInput.current?.focus();
-    }
-  };
-  const testConnection = async () => {
-    setTestingConnection(true);
-    setConnectionState("Connecting…");
-    try {
-      const base = resolverBase(prefs.resolverUrl);
-      const response = await fetch(`${base}/health`, {
-        signal: AbortSignal.timeout(10_000),
-        credentials: "omit",
-      });
-      const data = await response.json();
-      if (!response.ok || data.status !== "ok")
-        throw new Error("Resolver is not ready.");
-      library.changePrefs({ resolverUrl: base });
-      setConnectionState("Connected. Ready for service links.");
-    } catch (error) {
-      setConnectionState(
-        error instanceof TypeError
-          ? "Could not connect. Check the URL, HTTPS, and allowed origins."
-          : (error as Error).message,
-      );
-    } finally {
-      setTestingConnection(false);
     }
   };
 
@@ -556,6 +529,7 @@ export default function Downloader() {
                       <button
                         className={`track-art art-${index % 4} ${playingId === track.id ? "is-playing" : ""}`}
                         onClick={() => preview(track)}
+                        disabled={!track.file && !track.output}
                         aria-label={`${playingId === track.id ? "Pause" : "Preview"} ${track.title}`}
                       >
                         {playingId === track.id ? (
@@ -765,20 +739,19 @@ export default function Downloader() {
                 <div className="help-detail">
                   <strong>About service links</strong>
                   <p>
-                    Service imports use a resolver you run or trust. Spotify
-                    supplies the track list; audio comes from the YouTube
-                    matches you select. Bandcamp purchases and private or
-                    restricted tracks need your original files.
+                    Links open automatically. Spotify supplies the track list;
+                    audio comes from the YouTube matches you select. Bandcamp
+                    purchases and private or restricted tracks need your
+                    original files.
                   </p>
                 </div>
                 <button
                   className="primary-button full-width"
                   onClick={() => {
                     setHelpOpen(false);
-                    library.setSettingsOpen(true);
                   }}
                 >
-                  Set up service imports <ArrowRight size={16} />
+                  Done <Check size={16} />
                 </button>
               </>
             ) : (
@@ -818,63 +791,6 @@ export default function Downloader() {
                   <p className="settings-note">
                     Converting to lossless or increasing quality does not
                     restore missing detail. Original keeps the source untouched.
-                  </p>
-                </div>
-                <div className="settings-section resolver-settings">
-                  <h3>
-                    Service imports <span>RESOLVER</span>
-                  </h3>
-                  <p>
-                    A small companion service opens music links. Audio
-                    conversion and ZIPs run here, on your device.
-                  </p>
-                  <label className="field-label" htmlFor="resolver-url">
-                    Resolver URL
-                  </label>
-                  <div className="resolver-field">
-                    <input
-                      id="resolver-url"
-                      placeholder="https://your-resolver.example.com"
-                      value={prefs.resolverUrl}
-                      onChange={(event) => {
-                        library.changePrefs({
-                          resolverUrl: event.target.value,
-                        });
-                        setConnectionState("");
-                      }}
-                      disabled={locked}
-                    />
-                    <button
-                      className="secondary-button"
-                      onClick={testConnection}
-                      disabled={
-                        !prefs.resolverUrl || locked || testingConnection
-                      }
-                    >
-                      {testingConnection ? (
-                        <LoaderCircle size={15} className="spin" />
-                      ) : (
-                        "Test"
-                      )}
-                    </button>
-                  </div>
-                  {connectionState && (
-                    <p className="connection-state" role="status">
-                      {connectionState}
-                    </p>
-                  )}
-                  <a
-                    className="setup-link"
-                    href="https://github.com/cristonj/MusicDownloader/tree/feat/browser-music-downloader/resolver"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Resolver setup <ExternalLink size={12} />
-                  </a>
-                  <p className="settings-note">
-                    Your resolver receives service links and fetches source
-                    audio. Connect only to one you trust. Local files never
-                    leave this browser.
                   </p>
                 </div>
                 <button

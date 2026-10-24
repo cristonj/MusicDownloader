@@ -8,11 +8,6 @@ import {
   readPreferences,
   safeFilename,
 } from "../src/lib/model";
-import {
-  resolveLink,
-  resolverBase,
-  ResolverRequiredError,
-} from "../src/lib/sources";
 
 describe("source boundaries", () => {
   it("recognizes service hosts without accepting lookalike domains", () => {
@@ -31,22 +26,6 @@ describe("source boundaries", () => {
     expect(() =>
       parseUrl("https://user:password@example.com/file.mp3"),
     ).toThrow();
-  });
-  it("requires encrypted resolver traffic outside localhost", () => {
-    expect(() => resolverBase("http://remote.test")).toThrow("HTTPS");
-    expect(resolverBase("http://localhost:8080/")).toBe(
-      "http://localhost:8080",
-    );
-    expect(() => resolverBase("https://example.test/?token=secret")).toThrow();
-  });
-  it("requires a real resolver for service URLs, including Spotify", async () => {
-    await expect(
-      resolveLink(
-        "https://open.spotify.com/track/abc",
-        "",
-        new AbortController().signal,
-      ),
-    ).rejects.toBeInstanceOf(ResolverRequiredError);
   });
 });
 describe("export decisions", () => {

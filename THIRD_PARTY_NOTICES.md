@@ -6,8 +6,9 @@ MusicDownloader uses these third-party projects. Their own copyright and license
 - [fflate](https://github.com/101arrowz/fflate): MIT.
 - [Lucide](https://lucide.dev/license): ISC.
 - [DM Sans](https://github.com/googlefonts/dm-fonts) and [Manrope](https://github.com/sharanda/manrope): SIL Open Font License 1.1, bundled by Fontsource.
-- [Next.js](https://github.com/vercel/next.js), [React](https://github.com/facebook/react), and [FastAPI](https://github.com/fastapi/fastapi): MIT.
+- [Next.js](https://github.com/vercel/next.js), [React](https://github.com/facebook/react): MIT.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp): Unlicense, with separate third-party dependency licenses.
-- [SpotipyFree](https://pypi.org/project/spotipyFree/): see the upstream package license and metadata.
+- [spotify-url-info](https://github.com/microlinkhq/spotify-url-info): MIT; reads public Spotify metadata.
+- [Undici](https://github.com/nodejs/undici): MIT.
 
 Service names and logos identify compatible link sources; MusicDownloader is not affiliated with those services.

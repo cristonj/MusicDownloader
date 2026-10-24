@@ -1,64 +1,48 @@
 # MusicDownloader
 
-A small, personal music downloader. Paste a link, choose a format, keep a song or a playlist ZIP.
+A personal music downloader. Paste a song or playlist link, choose a format, download.
 
-React, Next.js, TypeScript. No accounts, analytics, database, or uploaded local files.
-
-## Run
+## Run or deploy
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. Local files and direct audio URLs work immediately. Direct URLs must allow browser access (CORS).
+Open http://localhost:3000. **No API keys, resolver URLs, Python installation, or separate service.** The app automatically prepares its private extraction tool before development/build. Node 22+ is required by the application.
 
-For music-service links, run the [resolver](resolver/README.md) too. Or run the entire app and resolver together:
+For Netlify, connect the repository and deploy. `netlify.toml` builds the complete Next.js application; Netlify's Next.js adapter runs the API routes on demand. There are no required environment variables or additional services to configure. Alternatively, `docker compose up --build` runs the whole app on http://localhost:8080.
 
-```sh
-docker compose up --build
-```
+## Downloads
 
-Open http://localhost:8080. The container automatically connects the interface to its resolver.
+- YouTube songs/playlists, SoundCloud tracks/sets, and public Bandcamp tracks/albums use the built-in server endpoints.
+- Spotify public songs, albums, and playlists import metadata without an API key, then match to YouTube recordings. Review the visible matches and select the recordings to download. Unmatched entries stay visible; private/unavailable tracks are not silently replaced.
+- Local files stay on the device. Direct audio URLs also work when their server permits browser access.
+- Original, MP3, AAC/M4A, FLAC, WAV, OGG/Vorbis, Opus, and AIFF. Lossy bitrate, lossless bit depth, and sample rate where supported. Increasing output settings cannot recover detail missing from the source.
+- Select several tracks for a ZIP. Conversion and ZIP creation use browser workers. No accounts, database, analytics, or uploaded local files.
 
-## What works
+## How the server works
 
-- **YouTube:** songs and playlists, through yt-dlp.
-- **SoundCloud:** public tracks and sets, through yt-dlp.
-- **Bandcamp:** publicly accessible tracks and albums, through yt-dlp. Import purchased originals for their full quality.
-- **Spotify:** public track, album, and playlist metadata, matched to YouTube recordings. Matches are shown and start unselected for review. Unmatched tracks remain visible. It does not decrypt or download Spotify streams.
-- **Local files / direct audio URLs:** no resolver required.
-- **Exports:** Original, MP3, AAC/M4A, FLAC, WAV, OGG/Vorbis, Opus, AIFF. Bitrate, 16/24-bit lossless output, and sample-rate controls where applicable. Original avoids transcoding entirely.
-- **ZIPs:** selected tracks, built locally in a worker; duplicate filenames are preserved.
+`/api/resolve` reads a public track list. Spotify matches use bounded parallel `/api/match` requests. `/api/audio` opens a selected source only when requested; `/api/media` transfers signed, allowlisted CDN audio in chunks of at most 2 MiB. This keeps every response below Netlify's [function payload limits](https://docs.netlify.com/build/functions/configuration/). No audio files or jobs are persisted on the server.
 
-Conversion uses same-origin FFmpeg WebAssembly, loaded only when needed (~31 MB). Network fetches run three at a time; conversions run serially to protect memory. ZIPs store already compressed audio without recompressing it. Cancellation, per-track errors, previews, selection, and saved preferences are included.
+Progressive audio is passed through. Unencrypted on-demand HLS audio is assembled in the browser and remuxed without re-encoding for Original exports. Source access still happens on the web server when necessary; conversion and playlist ZIPs stay on the device. FFmpeg WebAssembly (~31 MB) loads only when conversion/remuxing is needed.
 
-Higher export settings cannot recover information absent from the source. Source availability, source quality, rate limits, and region restrictions still apply. Public Spotify metadata and YouTube extraction can change upstream; matching is a best effort, not a guarantee of the same master.
+The build downloads a pinned standalone yt-dlp release, verifies its SHA-256 against the release checksum list, and generates a private signing key. Both live in ignored `.server/` and are included in the server's deployment trace, never in `public/` or the browser bundle. A fresh deployment automatically supplies its own signing key. Linux x64/arm64, macOS, and Windows x64 development hosts are supported by the preparation script.
 
-Browser limits: 100 tracks, 150 MB per input, 450 MB retained collection. Large lossless conversions may need smaller batches, especially on phones. Tracks are held in memory and disappear on refresh; only preferences persist.
+Each server invocation has a bounded timeout. Public source URLs and CDN hosts are allowlisted; generic yt-dlp extraction is disabled. Media tickets expire after one hour, cross-origin requests are rejected, transfers are bounded, and local inputs never go to these endpoints. Serverless in-memory rate limits are a small additional guard, not an authentication system.
 
-## Netlify
+Availability, region restrictions, anti-bot checks, and upstream metadata/extractor changes can still prevent individual downloads. Encrypted/live streams and private or paid-only files require your originals. Spotify metadata embeds may be unavailable or incomplete; use a smaller public playlist when the source does not expose the full list. There is no claim to download or decrypt Spotify streams.
 
-`netlify.toml` builds a static Next.js export with Node 22 and publishes `out/`. No Next.js server or paid serverless functions are needed for the interface.
+Browser limits: 100 tracks, 150 MB per input, 450 MB retained collection. Phones may need smaller lossless batches. Tracks disappear on refresh; only audio preferences persist. Use music you own or have permission to download.
 
-1. Connect this repository in Netlify.
-2. Host the Python resolver on a container host/VPS with HTTPS and outbound access to the four music services. It cannot run inside Netlify's static hosting.
-3. Set **NEXT_PUBLIC_RESOLVER_URL** to its HTTPS URL in Netlify, then build/deploy.
-4. Set **ALLOWED_ORIGINS** on the resolver to the exact Netlify site origin. See [resolver setup](resolver/README.md).
-
-This configures service imports for him once, without asking him to set anything up in the app. Without that environment variable, a resolver can also be connected in Preferences. For a single-host deployment, the Docker image serves both parts.
-
-## Check
+## Checks
 
 ```sh
 npm run typecheck
 npm test
 npm run build
-npm start                     # preview the static export on port 3000
+npm start
 npm run test:e2e
-resolver/.venv/bin/python -m unittest resolver.test_resolver -v
 ```
 
-Browser tests need Chromium (`npx playwright install chromium` or `PLAYWRIGHT_CHROMIUM_PATH`) and `ffprobe`. They validate actual audio codecs for every format, byte-preserving ZIPs, matching/review, errors, preferences, and phone layout. External services are mocked in automated tests; the local export path uses real FFmpeg WASM.
-
-Use music you own or have permission to download. FFmpeg core is GPL licensed; see [third-party notices](THIRD_PARTY_NOTICES.md).
+Browser tests require Chromium (`npx playwright install chromium` or `PLAYWRIGHT_CHROMIUM_PATH`) and `ffprobe`. They inspect real exported codecs, ZIP bytes, source matching, failures, preferences, and mobile layout. External music services are mocked in automated tests; conversion uses real FFmpeg WASM. See [third-party notices](THIRD_PARTY_NOTICES.md).

@@ -4,14 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack --hostname 0.0.0.0",
-    "predev": "node scripts/copy-ffmpeg.mjs",
+    "predev": "node scripts/copy-ffmpeg.mjs && node scripts/prepare-server.mjs",
     "build": "next build --webpack",
-    "prebuild": "node scripts/copy-ffmpeg.mjs",
-    "start": "node scripts/serve.mjs",
-    "typecheck": "next typegen && tsc --noEmit",
+    "prebuild": "node scripts/copy-ffmpeg.mjs && node scripts/prepare-server.mjs",
+    "start": "node .next/standalone/server.js",
+    "typecheck": "node scripts/prepare-server.mjs && next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "preview": "node scripts/serve.mjs"
+    "preview": "node .next/standalone/server.js",
+    "postbuild": "node scripts/package-server.mjs"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.10",
@@ -22,7 +23,9 @@
     "lucide-react": "^0.468.0",
     "next": "^16.4.3",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "spotify-url-info": "^3.3.3",
+    "undici": "^7.30.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",

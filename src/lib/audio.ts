@@ -39,12 +39,14 @@ export async function convertAudio(
   signal: AbortSignal,
   onProgress: (progress: number) => void,
   onStatus: (message: string) => void,
+  remuxTo?: string,
 ): Promise<Blob> {
-  if (prefs.format === "original") return input;
+  if (prefs.format === "original" && !remuxTo) return input;
   const ffmpeg = await getEngine(signal, onStatus);
   if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
   const inputName = `input.${track.extension}`;
-  const outputName = `output.${prefs.format}`;
+  const outputFormat = prefs.format === "original" ? remuxTo! : prefs.format;
+  const outputName = `output.${outputFormat}`;
   const listener = ({ progress }: { progress: number }) =>
     onProgress(Math.max(0, Math.min(0.99, progress)));
   ffmpeg.on("progress", listener);
@@ -57,7 +59,9 @@ export async function convertAudio(
     const code = await ffmpeg.exec([
       "-i",
       inputName,
-      ...conversionArgs(prefs),
+      ...(prefs.format === "original"
+        ? ["-map", "0:a:0", "-vn", "-c:a", "copy"]
+        : conversionArgs(prefs)),
       "-map_metadata",
       "0",
       ...(track.provider === "Local file"
@@ -86,7 +90,7 @@ export async function convertAudio(
       opus: "audio/ogg",
       aiff: "audio/aiff",
     };
-    return new Blob([new Uint8Array(result)], { type: types[prefs.format] });
+    return new Blob([new Uint8Array(result)], { type: types[outputFormat] });
   } catch (error) {
     cancelConversion();
     if (signal.aborted) throw new DOMException("Cancelled", "AbortError");

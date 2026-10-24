@@ -11,17 +11,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: resolver/requirements.txt
       - run: npm ci
-      - run: python -m venv resolver/.venv && resolver/.venv/bin/pip install -r resolver/requirements.txt
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck && npm test
-      - run: resolver/.venv/bin/python -m unittest resolver.test_resolver -v
       - run: npm run test:e2e
         env:
           NEXT_TELEMETRY_DISABLED: "1"

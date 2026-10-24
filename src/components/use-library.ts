@@ -10,12 +10,7 @@ import {
   type Preferences,
   type Track,
 } from "@/lib/model";
-import {
-  fetchAudio,
-  localTrack,
-  resolveLink,
-  ResolverRequiredError,
-} from "@/lib/sources";
+import { fetchAudio, localTrack, resolveLink } from "@/lib/sources";
 import { cancelConversion, convertAudio, makeZip, saveBlob } from "@/lib/audio";
 
 export function useLibrary() {
@@ -43,15 +38,7 @@ export function useLibrary() {
       const saved = readPreferences(
         localStorage.getItem("music-downloader:preferences"),
       );
-      setPrefs({
-        ...saved,
-        resolverUrl:
-          saved.resolverUrl ||
-          (process.env.NEXT_PUBLIC_RESOLVER_URL === "auto"
-            ? location.origin
-            : process.env.NEXT_PUBLIC_RESOLVER_URL) ||
-          "",
-      });
+      setPrefs(saved);
     } catch {
       /* Private browsing can disable localStorage. */
     }
@@ -96,15 +83,15 @@ export function useLibrary() {
   const changePrefs = (update: Partial<Preferences>) => {
     if (running.current) return;
     setPrefs((p) => ({ ...p, ...update }));
-    if (Object.keys(update).some((key) => key !== "resolverUrl"))
+    if (Object.keys(update).length > 0)
       setTracks((items) =>
         items.map((t) => ({
           ...t,
           output: undefined,
           outputName: undefined,
-          status: "ready",
+          status: t.file || t.mediaUrl ? "ready" : "error",
           progress: 0,
-          error: undefined,
+          error: t.file || t.mediaUrl ? undefined : t.error,
         })),
       );
   };
@@ -143,11 +130,7 @@ export function useLibrary() {
     setNotice(null);
     const timeout = setTimeout(() => controller.abort(), 180_000);
     try {
-      const result = await resolveLink(
-        link,
-        prefs.resolverUrl,
-        controller.signal,
-      );
+      const result = await resolveLink(link, controller.signal);
       if (current.current.length + result.tracks.length > MAX_TRACKS)
         throw new Error(
           `Keep your collection under ${MAX_TRACKS} tracks. Clear it to import this playlist.`,
@@ -160,7 +143,6 @@ export function useLibrary() {
         );
       return true;
     } catch (error) {
-      if (error instanceof ResolverRequiredError) setSettingsOpen(true);
       notify(
         controller.signal.aborted
           ? "Import cancelled or timed out. Try a smaller playlist."
@@ -203,7 +185,11 @@ export function useLibrary() {
           group.map(async (track) => {
             if (signal.aborted) return null;
             if (track.output)
-              return { blob: track.output, extension: track.extension };
+              return {
+                blob: track.output,
+                extension: track.extension,
+                remuxTo: undefined as string | undefined,
+              };
             patch(track.id, {
               status: "fetching",
               error: undefined,
@@ -248,7 +234,7 @@ export function useLibrary() {
           try {
             let output = track.output;
             if (!output) {
-              if (prefs.format !== "original")
+              if (prefs.format !== "original" || fetched.remuxTo)
                 patch(track.id, { status: "converting", progress: 0.35 });
               output = await convertAudio(
                 input,
@@ -257,6 +243,7 @@ export function useLibrary() {
                 signal,
                 (value) => patch(track.id, { progress: 0.35 + value * 0.65 }),
                 setStatus,
+                fetched.remuxTo,
               );
               if (signal.aborted)
                 throw new DOMException("Cancelled", "AbortError");
@@ -268,9 +255,23 @@ export function useLibrary() {
                 );
             }
             const name =
-              track.outputName || outputFilename(track, prefs.format);
+              track.outputName ||
+              outputFilename(
+                {
+                  ...track,
+                  extension:
+                    prefs.format === "original"
+                      ? fetched.remuxTo || track.extension
+                      : track.extension,
+                },
+                prefs.format,
+              );
             patch(track.id, {
               status: "done",
+              extension:
+                prefs.format === "original"
+                  ? fetched.remuxTo || track.extension
+                  : track.extension,
               output,
               outputName: name,
               progress: 1,

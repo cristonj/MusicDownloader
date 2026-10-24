@@ -17,13 +17,11 @@ test("local conversion creates real audio in every format without uploading", as
   });
   await page.goto("/");
   await expect(page.getByLabel("Output format")).toBeEnabled();
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "Sunday morning.wav",
-      mimeType: "audio/wav",
-      buffer: Buffer.from(await demoFile().arrayBuffer()),
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "Sunday morning.wav",
+    mimeType: "audio/wav",
+    buffer: Buffer.from(await demoFile().arrayBuffer()),
+  });
   await expect(page.getByText("Sunday morning", { exact: true })).toBeVisible();
   const formats = {
     original: "pcm_s16le",
@@ -69,13 +67,11 @@ test("ZIP preserves duplicate filenames and original bytes", async ({
   await page.goto("/");
   await page.getByLabel("Output format").selectOption("original");
   await expect(page.getByLabel("Output format")).toBeEnabled();
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "Sunday morning.wav",
-      mimeType: "audio/wav",
-      buffer: Buffer.from(await demoFile().arrayBuffer()),
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "Sunday morning.wav",
+    mimeType: "audio/wav",
+    buffer: Buffer.from(await demoFile().arrayBuffer()),
+  });
   const waiting = page.waitForEvent("download", { timeout: 20_000 });
   await page
     .getByRole("button", { name: "Download track", exact: true })
@@ -106,12 +102,11 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
     localStorage.setItem(
       "music-downloader:preferences",
       JSON.stringify({
-        resolverUrl: "https://resolver.test",
         format: "original",
       }),
     ),
   );
-  await page.route("https://resolver.test/resolve", (route) =>
+  await page.route("**/api/resolve", (route) =>
     route.fulfill({
       json: {
         title: "His playlist",
@@ -121,7 +116,7 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
             artist: "An artist",
             extension: "m4a",
             duration: 180,
-            mediaUrl: "/media/signed",
+            mediaUrl: "/api/audio?ticket=signed",
             sourceUrl: "https://www.youtube.com/watch?v=abcdefghijk",
             matchedTitle: "An artist — A favorite (Official audio)",
             matchConfidence: 0.99,
@@ -169,13 +164,9 @@ test("errors are actionable and settings persist", async ({ page }) => {
   await page.getByLabel("Output format").selectOption("flac");
   await page.reload();
   await expect(page.getByLabel("Output format")).toHaveValue("flac");
-  await page
-    .getByLabel("Music or playlist link")
-    .fill("https://www.youtube.com/watch?v=abcdefghijk");
-  await page.getByRole("button", { name: "Add music link" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.locator(".notice[role=alert]")).toContainText(
-    "Connect a resolver",
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toContainText(
+    /resolver|service imports|connection/i,
   );
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).not.toBeVisible();
@@ -203,13 +194,11 @@ test("minimal screen fits desktop and mobile", async ({ page }, info) => {
 test("24-bit WAV export honors the selected sample rate", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByLabel("Output format")).toBeEnabled();
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "Quality.wav",
-      mimeType: "audio/wav",
-      buffer: Buffer.from(await demoFile().arrayBuffer()),
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "Quality.wav",
+    mimeType: "audio/wav",
+    buffer: Buffer.from(await demoFile().arrayBuffer()),
+  });
   await page.getByLabel("Output format").selectOption("wav");
   await page.getByLabel("Bit depth").selectOption("24");
   await page.getByRole("button", { name: "Preferences", exact: true }).click();
@@ -238,20 +227,23 @@ test("source failure keeps successful ZIP tracks and the true original extension
     localStorage.setItem(
       "music-downloader:preferences",
       JSON.stringify({
-        resolverUrl: "https://resolver.test",
         format: "original",
       }),
     ),
   );
-  await page.route("https://resolver.test/resolve", (route) =>
+  await page.route("**/api/resolve", (route) =>
     route.fulfill({
       json: {
         title: "Two songs",
         tracks: [
-          { title: "Good track", mediaUrl: "/media/good", extension: "m4a" },
+          {
+            title: "Good track",
+            mediaUrl: "/api/audio?ticket=good",
+            extension: "m4a",
+          },
           {
             title: "Unavailable track",
-            mediaUrl: "/media/bad",
+            mediaUrl: "/api/audio?ticket=bad",
             extension: "m4a",
           },
         ],
@@ -259,15 +251,24 @@ test("source failure keeps successful ZIP tracks and the true original extension
     }),
   );
   const wav = Buffer.from(await demoFile().arrayBuffer());
-  await page.route("https://resolver.test/media/good", (route) =>
+  await page.route("**/api/audio?ticket=good", (route) =>
     route.fulfill({
-      body: wav,
-      contentType: "audio/wav",
-      headers: { "X-Audio-Extension": "wav" },
+      json: { extension: "wav", parts: ["/api/media?ticket=good"] },
     }),
   );
-  await page.route("https://resolver.test/media/bad", (route) =>
-    route.fulfill({ status: 410, body: "" }),
+  await page.route("**/api/media?ticket=good", (route) =>
+    route.fulfill({
+      status: 206,
+      body: wav,
+      contentType: "audio/wav",
+      headers: {
+        "Content-Range": `bytes 0-${wav.length - 1}/${wav.length}`,
+        "X-Audio-More": "0",
+      },
+    }),
+  );
+  await page.route("**/api/audio?ticket=bad", (route) =>
+    route.fulfill({ status: 410, json: { detail: "This link expired." } }),
   );
   await page.goto("/");
   await page
@@ -286,4 +287,49 @@ test("source failure keeps successful ZIP tracks and the true original extension
   await expect(
     page.getByText("This link expired.", { exact: false }),
   ).toBeVisible();
+});
+
+test('large service downloads use parallel bounded chunks with no setup', async ({page})=>{
+  const source=Buffer.alloc(7*1024*1024+17);
+  for(let i=0;i<source.length;i++)source[i]=i%251;
+  await page.route('**/api/resolve',route=>route.fulfill({json:{title:'A track',tracks:[{title:'Large track',mediaUrl:'/api/audio?ticket=large',extension:'wav'}]}}));
+  await page.route('**/api/audio?ticket=large',route=>route.fulfill({json:{extension:'wav',parts:['/api/media?ticket=large']}}));
+  let active=0,peak=0;
+  await page.route('**/api/media?ticket=large',async route=>{
+    const match=route.request().headers().range.match(/bytes=(\d+)-(\d+)/)!;
+    const start=Number(match[1]),end=Math.min(Number(match[2]),source.length-1);
+    expect(end-start+1).toBeLessThanOrEqual(2*1024*1024);
+    peak=Math.max(peak,++active);
+    await new Promise(resolve=>setTimeout(resolve,start%3*15+30));
+    await route.fulfill({status:206,body:source.subarray(start,end+1),contentType:'audio/wav',headers:{'Content-Range':`bytes ${start}-${end}/${source.length}`,'X-Audio-More':end+1<source.length ? '1':'0'}});
+    active--;
+  });
+  await page.goto('/');
+  await page.getByLabel('Music or playlist link').fill('https://artist.bandcamp.com/track/example');
+  await page.getByRole('button',{name:'Add music link'}).click();
+  await expect(page.getByText('Large track',{exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  const waiting=page.waitForEvent('download',{timeout:20000});
+  await page.getByRole('button',{name:'Download track',exact:true}).click();
+  const result=await waiting;
+  expect((await readFile((await result.path())!)).equals(source)).toBe(true);
+  expect(peak).toBeGreaterThanOrEqual(2);
+});
+
+test('Original HLS audio is assembled and remuxed locally without transcoding',async({page})=>{
+  const wav=Buffer.from(await demoFile().arrayBuffer());
+  const stream=execFileSync('ffmpeg',['-v','error','-i','pipe:0','-c:a','aac','-f','mpegts','pipe:1'],{input:wav});
+  await page.route('**/api/resolve',route=>route.fulfill({json:{title:'HLS track',tracks:[{title:'HLS track',mediaUrl:'/api/audio?ticket=hls',extension:'m4a'}]}}));
+  await page.route('**/api/audio?ticket=hls',route=>route.fulfill({json:{extension:'ts',remuxTo:'m4a',parts:['/api/media?ticket=hls']}}));
+  await page.route('**/api/media?ticket=hls',route=>route.fulfill({status:206,body:stream,contentType:'video/mp2t',headers:{'Content-Range':`bytes 0-${stream.length-1}/${stream.length}`,'X-Audio-More':'0'}}));
+  await page.goto('/');
+  await page.getByLabel('Music or playlist link').fill('https://soundcloud.com/artist/track');
+  await page.getByRole('button',{name:'Add music link'}).click();
+  const waiting=page.waitForEvent('download',{timeout:20000});
+  await page.getByRole('button',{name:'Download track',exact:true}).click();
+  const result=await waiting;
+  expect(result.suggestedFilename()).toBe('HLS track.m4a');
+  const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_streams','-of','json',(await result.path())!],{encoding:'utf8'}));
+  expect(probe.streams[0].codec_name).toBe('aac');
+  expect(Number(probe.streams[0].duration)).toBeGreaterThan(4.9);
 });
