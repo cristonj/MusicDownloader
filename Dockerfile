@@ -21,7 +21,7 @@ RUN --mount=type=secret,id=proxy_ca \
 COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
 COPY --from=frontend /app/out /app/public
 COPY resolver/app.py resolver/worker.py ./
-RUN useradd --create-home music
+RUN useradd --create-home music && chmod -R a+rX /app
 USER music
 ENV STATIC_DIRECTORY=/app/public
 EXPOSE 8080
