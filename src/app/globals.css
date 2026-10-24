@@ -52,12 +52,9 @@ select,
 input {
   outline: none;
 }
-button:focus-visible,
-a:focus-visible,
-select:focus-visible,
-input:focus-visible {
-  outline: 3px solid #85a64b;
-  outline-offset: 4px;
+:focus,
+:focus-visible {
+  outline: none;
 }
 button {
   transition:
@@ -173,10 +170,7 @@ h1 > span {
     border-color 0.2s,
     box-shadow 0.2s;
 }
-.link-field:focus-within {
-  border-color: #a6bb7b;
-  box-shadow: 0 0 0 3px #d5f87220;
-}
+
 .input-link-icon {
   color: #99a18d;
   flex-shrink: 0;

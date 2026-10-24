@@ -92,6 +92,51 @@ describe("private server endpoints", () => {
     expect(result.tracks[0].mediaUrl).toMatch(/^\/api\/audio\?ticket=/);
     expect(result.tracks[0].title).toBe("A song");
   });
+  it("opens YouTube Music share links through the regular YouTube audio path", async () => {
+    const shared =
+      "https://music.youtube.com/watch?v=xKJtIjB3pAI&si=3ZN4Gzsw8cDL-uIf";
+    const canonical = "https://www.youtube.com/watch?v=xKJtIjB3pAI";
+    vi.mocked(extract)
+      .mockResolvedValueOnce({
+        title: "Shared song",
+        webpage_url: shared,
+        ext: "m4a",
+      })
+      .mockResolvedValueOnce({
+        url: "https://r1.googlevideo.com/audio",
+        protocol: "https",
+        ext: "m4a",
+      });
+    const response = await resolve(
+      new Request("http://localhost/api/resolve", {
+        method: "POST",
+        body: JSON.stringify({ url: shared }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(extract).toHaveBeenNthCalledWith(
+      1,
+      canonical,
+      true,
+      expect.any(AbortSignal),
+    );
+    expect(result.tracks[0].sourceUrl).toBe(canonical);
+    const download = await audio(
+      new Request(`http://localhost${result.tracks[0].mediaUrl}`),
+    );
+    expect(download.status).toBe(200);
+    expect(extract).toHaveBeenNthCalledWith(
+      2,
+      canonical,
+      false,
+      expect.any(AbortSignal),
+    );
+    expect((await download.json()).parts).toHaveLength(1);
+    const playlist = allowedSource(shared + "&list=PLexample&index=3");
+    expect(playlist.searchParams.get("list")).toBe("PLexample");
+    expect(playlist.searchParams.get("index")).toBe("3");
+  });
   it("opens a source only when its signed audio endpoint is requested", async () => {
     vi.mocked(extract).mockResolvedValue({
       url: "https://r1.googlevideo.com/audio",
@@ -161,7 +206,9 @@ describe("bounded audio transport", () => {
     expect(first.more).toBe(true);
     expect(last.body.length).toBe(19);
     expect(last.more).toBe(false);
-    expect(Buffer.concat([first.body, last.body]).equals(Buffer.from(source))).toBe(true);
+    expect(
+      Buffer.concat([first.body, last.body]).equals(Buffer.from(source)),
+    ).toBe(true);
   });
   it("does not trust upstream ranges or pages disguised as media", async () => {
     vi.mocked(mediaFetch).mockResolvedValueOnce(

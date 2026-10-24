@@ -87,6 +87,12 @@ export function allowedSource(value: string): URL {
       400,
       "Use a YouTube, Spotify, SoundCloud, or Bandcamp link.",
     );
+  // Music share links identify the same recordings as regular YouTube.
+  // Use one extraction/cache path without the share-specific tracking token.
+  if (provider === "YouTube") {
+    if (url.hostname === "music.youtube.com") url.hostname = "www.youtube.com";
+    url.searchParams.delete("si");
+  }
   return url;
 }
 const mediaDomains = [

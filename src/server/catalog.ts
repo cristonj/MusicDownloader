@@ -59,11 +59,11 @@ export function matchScore(
   return Math.max(0, Math.min(1, score));
 }
 function downloadTrack(track: CatalogTrack, url: string): CatalogTrack {
-  allowedSource(url);
+  const source = allowedSource(url).href;
   return {
     ...track,
-    sourceUrl: url,
-    mediaUrl: `/api/audio?ticket=${signTicket({ kind: "source", url })}`,
+    sourceUrl: source,
+    mediaUrl: `/api/audio?ticket=${signTicket({ kind: "source", url: source })}`,
   };
 }
 export async function resolveCatalog(value: string, signal?: AbortSignal) {
