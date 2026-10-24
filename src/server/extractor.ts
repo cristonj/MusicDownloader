@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { HttpError } from "./security";
+import { extractionFailure, ExtractionError } from "./extraction-error";
 export interface Extracted {
   id?: string;
   title?: string;
@@ -15,6 +16,9 @@ export interface Extracted {
   protocol?: string;
   acodec?: string;
   is_live?: boolean;
+  vcodec?: string;
+  fragments?: { url?: string; path?: string; range?: string }[];
+  fragment_base_url?: string;
   http_headers?: Record<string, string>;
   entries?: Extracted[];
   filesize?: number;
@@ -24,7 +28,10 @@ async function extractUncached(
   url: string,
   flat = false,
   signal?: AbortSignal,
+  profile?: "web_embedded" | "web_safari",
 ): Promise<Extracted> {
+  const youtube =
+    /^https:\/\/(?:www\.|music\.|m\.)?(?:youtube\.com|youtu\.be)\//i.test(url);
   const binary = join(
     process.cwd(),
     ".server",
@@ -43,6 +50,7 @@ async function extractUncached(
     "1",
     "--use-extractors",
     "youtube.*,soundcloud.*,bandcamp.*",
+    "--no-js-runtimes",
     "--js-runtimes",
     `node:${process.execPath}`,
     "--dump-single-json",
@@ -52,15 +60,27 @@ async function extractUncached(
     "-f",
     "bestaudio[protocol=https]/bestaudio[protocol=http]/bestaudio/best",
   );
-  if (flat) args.push("--flat-playlist", "--playlist-end", "101");
+  if (flat)
+    args.push(
+      "--flat-playlist",
+      "--playlist-end",
+      "101",
+      "--ignore-no-formats-error",
+    );
   else args.push("--no-playlist");
+  if (profile)
+    args.push("--extractor-args", `youtube:player_client=${profile}`);
   args.push("--", url);
   return new Promise((resolve, reject) => {
     const process = spawn(binary, args, {
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
     const chunks: Buffer[] = [];
+    let stderr = "";
+    process.stderr.on("data", (data: Buffer) => {
+      stderr = (stderr + data.toString("utf8")).slice(-32768);
+    });
     let bytes = 0,
       settled = false;
     const finish = (error?: Error, data?: Extracted) => {
@@ -75,15 +95,20 @@ async function extractUncached(
       process.kill("SIGKILL");
       finish(new HttpError(499, "Import cancelled."));
     };
-    const timeout = setTimeout(() => {
-      process.kill("SIGKILL");
-      finish(
-        new HttpError(
-          504,
-          "This source took too long. Try a smaller playlist or another link.",
-        ),
-      );
-    }, 45000);
+    const timeout = setTimeout(
+      () => {
+        process.kill("SIGKILL");
+        finish(
+          new ExtractionError(
+            "SOURCE_TIMEOUT",
+            "This source took too long. Please try again.",
+            true,
+            504,
+          ),
+        );
+      },
+      youtube ? 18000 : 45000,
+    );
     if (signal?.aborted) {
       abort();
       return;
@@ -98,21 +123,23 @@ async function extractUncached(
     });
     process.on("error", () =>
       finish(
-        new HttpError(
+        new ExtractionError(
+          "EXTRACTOR_RUNTIME",
+          "The download engine could not start on the web server.",
+          false,
           503,
-          "The music service is temporarily unavailable. Please try again.",
         ),
       ),
     );
     process.on("close", (code) => {
       if (settled) return;
       if (code !== 0) {
-        finish(
-          new HttpError(
-            422,
-            "This track is unavailable, private, or temporarily blocked by the source.",
-          ),
+        const failure = extractionFailure(stderr, youtube);
+        // Keep logs useful without printing source links, headers, or signed URLs.
+        console.warn(
+          `[media-extractor] ${failure.category}; profile=${profile || "default"}; exit=${code}`,
         );
+        finish(failure);
         return;
       }
       try {
@@ -124,6 +151,57 @@ async function extractUncached(
       }
     });
   });
+}
+
+// Retry public playback clients for the same recording. Racing alternatives
+// keeps the complete operation below the serverless request budget.
+async function extractWithFallbacks(
+  url: string,
+  flat: boolean,
+  signal?: AbortSignal,
+): Promise<Extracted> {
+  try {
+    return await extractUncached(url, flat, signal);
+  } catch (error) {
+    if (
+      signal?.aborted ||
+      !(error instanceof ExtractionError) ||
+      !error.retryable
+    )
+      throw error;
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      throw error;
+    }
+    const video =
+      target.hostname === "youtu.be" ||
+      ([
+        "youtube.com",
+        "www.youtube.com",
+        "music.youtube.com",
+        "m.youtube.com",
+      ].includes(target.hostname) &&
+        (target.pathname === "/watch" ||
+          /^\/(?:shorts|embed|live)\//.test(target.pathname)));
+    if (!video) throw error;
+    const stop = new AbortController();
+    const combined = signal
+      ? AbortSignal.any([signal, stop.signal])
+      : stop.signal;
+    try {
+      return await Promise.any([
+        extractUncached(url, flat, combined, "web_embedded"),
+        extractUncached(url, flat, combined, "web_safari"),
+      ]);
+    } catch {
+      if (signal?.aborted) throw new HttpError(499, "Import cancelled.");
+      throw error;
+    } finally {
+      stop.abort();
+    }
+  }
 }
 
 // Warm invocations reuse recent lookups and share concurrent requests. Nothing
@@ -139,7 +217,7 @@ export async function extract(
     saved = cache.get(key);
   if (saved && saved.expires > Date.now()) return saved.value;
   if (pending.has(key)) return pending.get(key)!;
-  const request = extractUncached(url, flat, signal)
+  const request = extractWithFallbacks(url, flat, signal)
     .then((value) => {
       cache.set(key, { value, expires: Date.now() + 180000 });
       if (flat && !value.entries && value.url)
@@ -150,4 +228,21 @@ export async function extract(
     .finally(() => pending.delete(key));
   pending.set(key, request);
   return request;
+}
+
+export function extractUsingClient(
+  url: string,
+  client: "web_embedded" | "web_safari",
+  signal?: AbortSignal,
+) {
+  return extractUncached(url, false, signal, client);
+}
+export function invalidateExtraction(url: string) {
+  cache.delete(`true:${url}`);
+  cache.delete(`false:${url}`);
+}
+
+export function rememberExtraction(url: string, value: Extracted) {
+  cache.set(`false:${url}`, { value, expires: Date.now() + 180000 });
+  while (cache.size > 32) cache.delete(cache.keys().next().value!);
 }

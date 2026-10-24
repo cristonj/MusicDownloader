@@ -1,5 +1,11 @@
 import { MAX_FILE_BYTES } from "@/lib/model";
-import { extract } from "./extractor";
+import {
+  extract,
+  extractUsingClient,
+  invalidateExtraction,
+  rememberExtraction,
+  type Extracted,
+} from "./extractor";
 import {
   allowedMedia,
   HttpError,
@@ -116,35 +122,136 @@ export async function hlsManifest(
   if (!parts.length) throw new HttpError(422, "No audio segments were found.");
   return {
     extension: "ts",
-    remuxTo: /mp3/.test(codec) ? "mp3" : /opus/.test(codec) ? "opus" : "m4a",
+    remuxTo: audioExtension(codec),
     parts,
   };
 }
-export async function audioManifest(
-  url: string,
+function audioExtension(codec = "aac"): string {
+  return /mp3/.test(codec)
+    ? "mp3"
+    : /opus/.test(codec)
+      ? "opus"
+      : /vorbis/.test(codec)
+        ? "ogg"
+        : "m4a";
+}
+async function playableManifest(
+  info: Extracted,
   signal?: AbortSignal,
 ): Promise<AudioManifest> {
-  const info = await extract(url, false, signal);
   if (info.is_live)
     throw new HttpError(422, "Live streams cannot be downloaded.");
   if ((info.filesize || info.filesize_approx || 0) > MAX_FILE_BYTES)
     throw new HttpError(413, "This track exceeds the 150 MB browser limit.");
   if (!info.url) throw new HttpError(422, "No audio source was found.");
   const headers = sourceHeaders(info.http_headers);
+  let manifest: AudioManifest;
   if (
     info.protocol?.includes("m3u8") ||
     new URL(info.url).pathname.endsWith(".m3u8")
-  )
-    return hlsManifest(info.url, headers, info.acodec, signal);
-  if (info.protocol && !["http", "https"].includes(info.protocol))
-    throw new HttpError(
-      422,
-      "This audio stream is not supported. Try another source link.",
-    );
-  return {
-    extension: /^[a-z0-9]{1,5}$/.test(info.ext || "") ? info.ext! : "m4a",
-    parts: [proxy(info.url, headers)],
-  };
+  ) {
+    manifest = await hlsManifest(info.url, headers, info.acodec, signal);
+  } else if (info.protocol === "http_dash_segments" && info.fragments?.length) {
+    if (info.fragments.length > 3000)
+      throw new HttpError(422, "This track has too many audio segments.");
+    manifest = {
+      extension: info.ext || "m4a",
+      remuxTo: audioExtension(info.acodec),
+      parts: info.fragments.map((fragment) => {
+        const url = new URL(
+          fragment.url || fragment.path || "",
+          info.fragment_base_url || info.url,
+        ).href;
+        const range = fragment.range?.match(/^(\d+)-(\d+)$/);
+        return proxy(
+          url,
+          headers,
+          range ? [Number(range[1]), Number(range[2])] : undefined,
+        );
+      }),
+    };
+  } else {
+    if (info.protocol && !["http", "https"].includes(info.protocol))
+      throw new HttpError(422, "This audio stream is not supported.");
+    manifest = {
+      extension: /^[a-z0-9]{1,5}$/.test(info.ext || "") ? info.ext! : "m4a",
+      // A combined playback file can still provide the original audio losslessly.
+      ...(info.vcodec && info.vcodec !== "none"
+        ? { remuxTo: audioExtension(info.acodec) }
+        : {}),
+      parts: [proxy(info.url, headers)],
+    };
+  }
+  // Metadata can describe streams the CDN subsequently rejects. Probe a byte
+  // before choosing a candidate so fallback clients cover real stream failures.
+  const first = new URL(
+    manifest.parts[0],
+    "https://internal.invalid",
+  ).searchParams.get("ticket")!;
+  const { readTicket } = await import("./security");
+  const ticket = readTicket(first, "media");
+  const response = await mediaFetch(
+    ticket.url,
+    {
+      ...ticket.headers,
+      Range: `bytes=${ticket.range?.[0] || 0}-${ticket.range?.[0] || 0}`,
+    },
+    signal,
+  );
+  const mime = response.headers.get("content-type") || "";
+  await response.body?.cancel();
+  if (/text\/|application\/(json|xml)/i.test(mime))
+    throw new HttpError(422, "The source returned a page instead of audio.");
+  return manifest;
+}
+export async function audioManifest(
+  url: string,
+  signal?: AbortSignal,
+): Promise<AudioManifest> {
+  const info = await extract(url, false, signal);
+  try {
+    return await playableManifest(info, signal);
+  } catch (error) {
+    const host = new URL(url).hostname;
+    const youtube = [
+      "youtube.com",
+      "www.youtube.com",
+      "music.youtube.com",
+      "m.youtube.com",
+      "youtu.be",
+    ].includes(host);
+    if (
+      !youtube ||
+      signal?.aborted ||
+      !(error instanceof HttpError) ||
+      error.status === 413 ||
+      /Live streams/.test(error.message)
+    )
+      throw error;
+    invalidateExtraction(url);
+    const stop = new AbortController();
+    const combined = signal
+      ? AbortSignal.any([signal, stop.signal])
+      : stop.signal;
+    try {
+      return await Promise.any(
+        (["web_embedded", "web_safari"] as const).map(async (client) => {
+          const candidate = await extractUsingClient(url, client, combined);
+          const manifest = await playableManifest(candidate, combined);
+          rememberExtraction(url, candidate);
+          return manifest;
+        }),
+      );
+    } catch {
+      if (signal?.aborted) throw new HttpError(499, "Download cancelled.");
+      throw new HttpError(
+        503,
+        "YouTube rejected the available download streams from this server. Please try again later.",
+      );
+    } finally {
+      stop.abort();
+    }
+  }
 }
 export async function mediaChunk(
   ticket: MediaTicket,

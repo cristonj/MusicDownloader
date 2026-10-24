@@ -18,7 +18,12 @@ vi.mock("../src/server/upstream", () => ({
   mediaFetch: vi.fn(),
   publicFetch: vi.fn(),
 }));
-vi.mock("../src/server/extractor", () => ({ extract: vi.fn() }));
+vi.mock("../src/server/extractor", () => ({
+  extract: vi.fn(),
+  extractUsingClient: vi.fn(),
+  invalidateExtraction: vi.fn(),
+  rememberExtraction: vi.fn(),
+}));
 afterEach(() => vi.resetAllMocks());
 
 describe("private server endpoints", () => {
@@ -122,6 +127,11 @@ describe("private server endpoints", () => {
       expect.any(AbortSignal),
     );
     expect(result.tracks[0].sourceUrl).toBe(canonical);
+    vi.mocked(mediaFetch).mockResolvedValue(
+      new Response(new Uint8Array([1]), {
+        headers: { "Content-Type": "audio/mp4" },
+      }),
+    );
     const download = await audio(
       new Request(`http://localhost${result.tracks[0].mediaUrl}`),
     );
@@ -144,6 +154,11 @@ describe("private server endpoints", () => {
       protocol: "https",
       http_headers: { "User-Agent": "test", Cookie: "never-forward" },
     });
+    vi.mocked(mediaFetch).mockResolvedValue(
+      new Response(new Uint8Array([1]), {
+        headers: { "Content-Type": "audio/mp4" },
+      }),
+    );
     const token = signTicket({
       kind: "source",
       url: "https://youtube.com/watch?v=abcdefghijk",

@@ -309,7 +309,7 @@ export async function fetchAudio(
   return {
     blob: new Blob(pieces.flat()),
     extension: manifest.extension,
-    remuxTo: ["m4a", "mp3", "opus"].includes(manifest.remuxTo)
+    remuxTo: ["m4a", "mp3", "opus", "ogg"].includes(manifest.remuxTo)
       ? manifest.remuxTo
       : undefined,
   };
