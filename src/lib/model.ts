@@ -17,6 +17,7 @@ export interface Track {
   duration?: number;
   file?: File;
   mediaUrl?: string;
+  transport?: "helper";
   sourceUrl?: string;
   matchedTitle?: string;
   matchConfidence?: number;

@@ -16,3 +16,5 @@ next-env.d.ts
 .netlify/
 
 public/index.html
+.helper-build/
+helper-dist/

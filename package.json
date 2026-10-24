@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "preview": "node .next/standalone/server.js",
-    "postbuild": "node scripts/package-server.mjs"
+    "postbuild": "node scripts/package-server.mjs",
+    "build:helper": "node scripts/build-helper.mjs"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.10",
@@ -33,6 +34,8 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "@yao-pkg/pkg": "6.24.0",
+    "esbuild": "0.28.2",
     "typescript": "^5.9.0",
     "vitest": "^3.2.4"
   }

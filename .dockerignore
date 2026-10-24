@@ -10,3 +10,5 @@ playwright-report
 .env*
 .server
 .netlify
+.helper-build
+helper-dist

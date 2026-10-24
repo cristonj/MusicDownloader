@@ -31,6 +31,7 @@ import {
   type Provider,
   type Track,
 } from "@/lib/model";
+import HelperSetup from "./helper-setup";
 import { useLibrary } from "./use-library";
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -148,10 +149,11 @@ export default function Downloader() {
     if (playingId && !tracks.some((t) => t.id === playingId)) stopAudio();
   }, [tracks, playingId]);
   useEffect(() => {
-    if (!library.settingsOpen && !helpOpen) return;
+    if (!library.settingsOpen && !helpOpen && !library.helperOpen) return;
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         library.setSettingsOpen(false);
+        library.setHelperOpen(false);
         setHelpOpen(false);
       }
       if (event.key === "Tab") {
@@ -187,7 +189,7 @@ export default function Downloader() {
       if (previous?.matches("button, a[href], [tabindex]"))
         previous.focus({ preventScroll: true });
     };
-  }, [library.settingsOpen, helpOpen]);
+  }, [library.settingsOpen, helpOpen, library.helperOpen]);
 
   const preview = async (track: Track) => {
     if (playingId === track.id) {
@@ -260,6 +262,13 @@ export default function Downloader() {
         <header className="topbar">
           <Brand compact />
           <div className="topbar-right">
+            <button
+              className="icon-button"
+              aria-label="Desktop helper"
+              onClick={() => library.setHelperOpen(true)}
+            >
+              <Download size={18} />
+            </button>
             <button
               className="icon-button"
               aria-label="Help"
@@ -668,6 +677,9 @@ export default function Downloader() {
           </div>
         </div>
       )}
+      {library.helperOpen && (
+        <HelperSetup onClose={() => library.setHelperOpen(false)} />
+      )}
       {(library.settingsOpen || helpOpen) && (
         <div
           className="modal-backdrop"
@@ -737,10 +749,10 @@ export default function Downloader() {
                 <div className="help-detail">
                   <strong>About service links</strong>
                   <p>
-                    Links open automatically. Spotify supplies the track list;
-                    audio comes from the YouTube matches you select. Bandcamp
-                    purchases and private or restricted tracks need your
-                    original files.
+                    The desktop helper opens links using your connection.
+                    Spotify supplies the track list; audio comes from the
+                    YouTube matches you select. Bandcamp purchases and private
+                    or restricted tracks need your original files.
                   </p>
                 </div>
                 <button

@@ -11,4 +11,6 @@ MusicDownloader uses these third-party projects. Their own copyright and license
 - [spotify-url-info](https://github.com/microlinkhq/spotify-url-info): MIT; reads public Spotify metadata.
 - [Undici](https://github.com/nodejs/undici): MIT.
 
+- [Node.js](https://github.com/nodejs/node/blob/main/LICENSE) is included in the desktop helper and retains its third-party terms. [@yao-pkg/pkg](https://github.com/yao-pkg/pkg) and [esbuild](https://github.com/evanw/esbuild) provide packaging (MIT). The helper embeds the standalone yt-dlp release; its bundled dependency terms also apply. Helper source and build scripts are included in this repository.
+
 Service names and logos identify compatible link sources; MusicDownloader is not affiliated with those services.

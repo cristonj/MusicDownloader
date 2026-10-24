@@ -1,3 +1,4 @@
+import { helperConnection, HelperRequiredError, sourceFetch } from "./helper";
 import {
   extensionFor,
   MAX_FILE_BYTES,
@@ -58,13 +59,28 @@ export async function resolveLink(
       ],
     };
   }
-  const response = await fetch("/api/resolve", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: url.href }),
-    signal,
-  });
+  const transport = helperConnection() ? ("helper" as const) : undefined;
+  const response = await sourceFetch(
+    "/api/resolve",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url.href }),
+      signal,
+    },
+    transport,
+  );
   const result = await response.json().catch(() => null);
+  if (
+    !response.ok &&
+    !transport &&
+    /web server|from this server|blocking requests|download engine/i.test(
+      result?.detail || "",
+    )
+  )
+    throw new HelperRequiredError(
+      "Connect the desktop helper to open this link from your computer.",
+    );
   if (!response.ok)
     throw new Error(
       result?.detail || "This source could not be opened. Try another link.",
@@ -83,12 +99,16 @@ export async function resolveLink(
           item = result.tracks[index];
         if (typeof item.matchTicket !== "string") continue;
         try {
-          const response = await fetch("/api/match", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ticket: item.matchTicket }),
-            signal,
-          });
+          const response = await sourceFetch(
+            "/api/match",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ticket: item.matchTicket }),
+              signal,
+            },
+            transport,
+          );
           const matched = await response.json();
           result.tracks[index] = {
             ...item,
@@ -124,6 +144,7 @@ export async function resolveLink(
       artist: typeof item.artist === "string" ? item.artist.slice(0, 200) : "",
       duration: typeof item.duration === "number" ? item.duration : undefined,
       provider,
+      transport,
       mediaUrl: typeof item.mediaUrl === "string" ? item.mediaUrl : undefined,
       extension:
         typeof item.extension === "string" &&
@@ -132,7 +153,9 @@ export async function resolveLink(
           : "m4a",
       sourceUrl:
         typeof item.sourceUrl === "string" &&
-        providerFor(parseUrl(item.sourceUrl)) === "YouTube"
+        ["YouTube", "SoundCloud", "Bandcamp"].includes(
+          providerFor(parseUrl(item.sourceUrl)),
+        )
           ? item.sourceUrl
           : undefined,
       matchedTitle:
@@ -165,10 +188,54 @@ export async function fetchAudio(
   signal: AbortSignal,
   onProgress: (progress: number) => void,
 ): Promise<AudioInput> {
+  if (
+    helperConnection() &&
+    track.transport !== "helper" &&
+    track.sourceUrl &&
+    track.mediaUrl?.startsWith("/api/audio?ticket=")
+  ) {
+    const response = await sourceFetch(
+      "/api/resolve",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: track.sourceUrl }),
+        signal,
+      },
+      "helper",
+    );
+    const result = await response.json();
+    const resolved = result.tracks?.[0];
+    if (!response.ok || !resolved?.mediaUrl?.startsWith("/api/audio?ticket="))
+      throw new Error(
+        result.detail ||
+          resolved?.error ||
+          "Re-import this track with the helper connected.",
+      );
+    return fetchAudio(
+      { ...track, mediaUrl: resolved.mediaUrl, transport: "helper" },
+      signal,
+      onProgress,
+    );
+  }
   if (!track.mediaUrl?.startsWith("/api/audio?ticket="))
     return fetchDirectAudio(track, signal, onProgress);
-  const response = await fetch(track.mediaUrl, { signal });
+  const response = await sourceFetch(
+    track.mediaUrl,
+    { signal },
+    track.transport,
+  );
   const manifest = await response.json().catch(() => null);
+  if (
+    !response.ok &&
+    !track.transport &&
+    /web server|from this server|blocking requests|download engine/i.test(
+      manifest?.detail || "",
+    )
+  )
+    throw new HelperRequiredError(
+      "Connect the desktop helper to download from your computer.",
+    );
   if (!response.ok)
     throw new Error(
       manifest?.detail || "This audio is unavailable. Re-import the source.",
@@ -181,6 +248,34 @@ export async function fetchAudio(
     !/^[a-z0-9]{1,5}$/.test(manifest.extension)
   )
     throw new Error("This source returned an invalid audio stream.");
+  if (track.transport === "helper" && typeof manifest.browserUrl === "string") {
+    const remote = parseUrl(manifest.browserUrl);
+    if (
+      remote.protocol === "https:" &&
+      [
+        "googlevideo.com",
+        "sndcdn.com",
+        "bcbits.com",
+        "bandcamp.com",
+        "youtube.com",
+        "soundcloud.com",
+      ].some(
+        (host) =>
+          remote.hostname === host || remote.hostname.endsWith(`.${host}`),
+      )
+    ) {
+      try {
+        const direct = await fetchDirectAudio(
+          { ...track, mediaUrl: remote.href, extension: manifest.extension },
+          signal,
+          onProgress,
+        );
+        return { ...direct, remuxTo: manifest.remuxTo };
+      } catch (error) {
+        if (signal.aborted) throw error;
+      }
+    }
+  }
   const controller = new AbortController(),
     combined = AbortSignal.any([signal, controller.signal]);
   const chunkSize = 2 * 1024 * 1024;
@@ -189,10 +284,14 @@ export async function fetchAudio(
     received = 0,
     complete = 0;
   async function readRange(part: string, offset: number) {
-    const response = await fetch(part, {
-      signal: combined,
-      headers: { Range: `bytes=${offset}-${offset + chunkSize - 1}` },
-    });
+    const response = await sourceFetch(
+      part,
+      {
+        signal: combined,
+        headers: { Range: `bytes=${offset}-${offset + chunkSize - 1}` },
+      },
+      track.transport,
+    );
     if (response.status === 416 && offset > 0)
       return {
         bytes: [] as Uint8Array<ArrayBuffer>[],

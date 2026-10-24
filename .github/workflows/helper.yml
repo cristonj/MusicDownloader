@@ -1,0 +1,86 @@
+name: Desktop helper
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "helper/**"
+      - "src/server/**"
+      - "src/app/api/**"
+      - "src/lib/model.ts"
+      - "scripts/media-tools.mjs"
+      - "scripts/build-helper.mjs"
+      - "scripts/package-mac-helper.mjs"
+      - "package*.json"
+      - ".github/workflows/helper.yml"
+permissions:
+  contents: write
+concurrency:
+  group: desktop-helper-release
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare helper release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view helper-v1 || gh release create helper-v1 --title "MusicDownloader desktop helper" --notes "Self-contained desktop helper. Download the file for your computer and open it."
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+          - os: ubuntu-22.04
+            platform: linux
+          - os: macos-latest
+            platform: darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build executable
+        run: node scripts/build-helper.mjs ${{ matrix.platform }} x64
+      - name: Package Windows download
+        if: matrix.platform == 'win32'
+        shell: pwsh
+        run: |
+          & ./helper-dist/MusicDownloader-Helper-win32-x64.exe --self-test
+          Copy-Item helper-dist/MusicDownloader-Helper-win32-x64.exe helper-dist/MusicDownloader-Helper-Windows.exe
+      - name: Package Linux download
+        if: matrix.platform == 'linux'
+        run: |
+          ./helper-dist/MusicDownloader-Helper-linux-x64 --self-test
+          cp helper-dist/MusicDownloader-Helper-linux-x64 helper-dist/MusicDownloader-Helper
+          tar -czf helper-dist/MusicDownloader-Helper-Linux.tar.gz -C helper-dist MusicDownloader-Helper
+      - name: Package universal Mac app
+        if: matrix.platform == 'darwin'
+        run: |
+          node scripts/build-helper.mjs darwin arm64
+          ./helper-dist/MusicDownloader-Helper-darwin-$(node -p process.arch) --self-test
+          node scripts/package-mac-helper.mjs
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: helper-v1
+          name: MusicDownloader desktop helper
+          make_latest: true
+          fail_on_unmatched_files: false
+          body: |
+            Download the helper for your computer, open it, and approve the browser connection.
+            Python and Node are included; neither needs to be installed.
+            Keep the helper running while using MusicDownloader. Quit it from the app's helper setup.
+            These builds are unsigned and your operating system may ask you to allow them.
+            Mac: unzip, then open MusicDownloader Helper.app. Supports Apple Silicon and Intel.
+            Source and third-party notices: https://github.com/cristonj/MusicDownloader
+          files: |
+            helper-dist/MusicDownloader-Helper-Windows.exe
+            helper-dist/MusicDownloader-Helper-Linux.tar.gz
+            helper-dist/MusicDownloader-Helper-Mac.zip

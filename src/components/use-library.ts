@@ -11,6 +11,7 @@ import {
   type Track,
 } from "@/lib/model";
 import { fetchAudio, localTrack, resolveLink } from "@/lib/sources";
+import { consumeHelperPair, HelperRequiredError } from "@/lib/helper";
 import { cancelConversion, convertAudio, makeZip, saveBlob } from "@/lib/audio";
 
 export function useLibrary() {
@@ -24,6 +25,7 @@ export function useLibrary() {
     text: string;
     kind: "error" | "info" | "success";
   } | null>(null);
+  const [helperOpen, setHelperOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collection, setCollection] = useState("Your collection");
   const current = useRef<Track[]>([]);
@@ -35,6 +37,7 @@ export function useLibrary() {
 
   useEffect(() => {
     try {
+      if (consumeHelperPair()) setHelperOpen(true);
       const saved = readPreferences(
         localStorage.getItem("music-downloader:preferences"),
       );
@@ -143,6 +146,7 @@ export function useLibrary() {
         );
       return true;
     } catch (error) {
+      if (error instanceof HelperRequiredError) setHelperOpen(true);
       notify(
         controller.signal.aborted
           ? "Import cancelled or timed out. Try a smaller playlist."
@@ -214,6 +218,7 @@ export function useLibrary() {
               patch(track.id, { extension: data.extension });
               return data;
             } catch (error) {
+              if (error instanceof HelperRequiredError) setHelperOpen(true);
               if (!signal.aborted) {
                 patch(track.id, {
                   status: "error",
@@ -337,6 +342,8 @@ export function useLibrary() {
     status,
     notice,
     settingsOpen,
+    helperOpen,
+    setHelperOpen,
     collection,
     hydrated,
     setSettingsOpen,

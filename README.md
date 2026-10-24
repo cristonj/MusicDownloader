@@ -2,20 +2,39 @@
 
 A personal music downloader. Paste a song or playlist link, choose a format, download.
 
-## Run or deploy
+## Desktop setup
+
+Open the web app and choose **Desktop helper** (the download icon). The wizard provides a Windows `.exe`, a Mac app ZIP (Intel and Apple Silicon), or a Linux archive. Download, open, and approve the browser's local connection prompt. No Python, Node, terminal commands, API keys, or resolver configuration for the user.
+
+The self-contained helper bundles Node and the verified standalone extraction tool. It opens the web app and pairs automatically with a short-lived, device-local authorization token. Keep it running while downloading; use **Quit helper** in the wizard to stop it. These builds are unsigned, so the operating system may require an explicit allow/open confirmation. New helper builds are published automatically at [Desktop helper releases](https://github.com/cristonj/MusicDownloader/releases/tag/helper-v1).
+
+When connected, **all source requests**—YouTube/YouTube Music, SoundCloud, Bandcamp, Spotify metadata, and Spotify-to-YouTube matching—run from the computer's network connection. Existing tracks imported through the hosted API are re-resolved locally before downloading. This removes dependence on Netlify's IP for those operations; it does not guarantee access to private, region-restricted, or otherwise unavailable tracks, or remove a provider block affecting the user's own connection.
+
+The browser first tries direct CDN transfers when permitted. Cross-origin or header restrictions fall back to the loopback helper. HLS/DASH assembly, audio conversion, and playlist ZIP creation stay in browser workers. Local files never go to the helper or web server. Spotify audio comes from the visible YouTube matches, not decrypted Spotify streams.
+
+The helper listens only on `127.0.0.1`, validates the Host and exact web-app Origin, requires its random per-launch token, and uses signed, allowlisted source URLs. Pairing secrets travel in the browser fragment (not to Netlify), then move to origin-scoped local storage and are removed from the address bar. Other websites cannot use its local API. Modern browsers may require local network permission.
+
+## Development and deployment
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. **No API keys, resolver URLs, Python installation, or separate service.** The app automatically prepares its private extraction tool before development/build. Node 22+ is required by the application.
+Node 22+ is needed only for development/building, not to run a packaged helper. Netlify remains the web-app host; the hosted APIs are available when a helper is not connected. Run `npm run build:helper` to create the native self-contained executable under `helper-dist/`. GitHub Actions builds Windows, Linux, and both Mac architectures, checks the bundled runtimes with an empty PATH, and publishes the wizard's downloads.
+
+```sh
+npm ci
+npm run dev
+```
+
+Open http://localhost:3000. Source access without the helper depends on the hosted server being accepted by the provider. The production desktop helper pairs only with https://musicdownloaderapp.netlify.app.
 
 For Netlify, connect the repository and deploy. `netlify.toml` builds the complete Next.js application; Netlify's Next.js adapter runs the API routes on demand. There are no required environment variables or additional services to configure. Alternatively, `docker compose up --build` runs the whole app on http://localhost:8080.
 
 ## Downloads
 
-- YouTube songs/playlists, SoundCloud tracks/sets, and public Bandcamp tracks/albums use the built-in server endpoints.
+- YouTube songs/playlists, SoundCloud tracks/sets, and public Bandcamp tracks/albums use the connected desktop helper, or the hosted API when no helper is connected.
 - Spotify public songs, albums, and playlists import metadata without an API key, then match to YouTube recordings. Review the visible matches and select the recordings to download. Unmatched entries stay visible; private/unavailable tracks are not silently replaced.
 - Local files stay on the device. Direct audio URLs also work when their server permits browser access.
 - Original, MP3, AAC/M4A, FLAC, WAV, OGG/Vorbis, Opus, and AIFF. Lossy bitrate, lossless bit depth, and sample rate where supported. Increasing output settings cannot recover detail missing from the source.

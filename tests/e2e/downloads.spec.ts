@@ -289,47 +289,221 @@ test("source failure keeps successful ZIP tracks and the true original extension
   ).toBeVisible();
 });
 
-test('large service downloads use parallel bounded chunks with no setup', async ({page})=>{
-  const source=Buffer.alloc(7*1024*1024+17);
-  for(let i=0;i<source.length;i++)source[i]=i%251;
-  await page.route('**/api/resolve',route=>route.fulfill({json:{title:'A track',tracks:[{title:'Large track',mediaUrl:'/api/audio?ticket=large',extension:'wav'}]}}));
-  await page.route('**/api/audio?ticket=large',route=>route.fulfill({json:{extension:'wav',parts:['/api/media?ticket=large']}}));
-  let active=0,peak=0;
-  await page.route('**/api/media?ticket=large',async route=>{
-    const match=route.request().headers().range.match(/bytes=(\d+)-(\d+)/)!;
-    const start=Number(match[1]),end=Math.min(Number(match[2]),source.length-1);
-    expect(end-start+1).toBeLessThanOrEqual(2*1024*1024);
-    peak=Math.max(peak,++active);
-    await new Promise(resolve=>setTimeout(resolve,start%3*15+30));
-    await route.fulfill({status:206,body:source.subarray(start,end+1),contentType:'audio/wav',headers:{'Content-Range':`bytes ${start}-${end}/${source.length}`,'X-Audio-More':end+1<source.length ? '1':'0'}});
+test("large service downloads use parallel bounded chunks with no setup", async ({
+  page,
+}) => {
+  const source = Buffer.alloc(7 * 1024 * 1024 + 17);
+  for (let i = 0; i < source.length; i++) source[i] = i % 251;
+  await page.route("**/api/resolve", (route) =>
+    route.fulfill({
+      json: {
+        title: "A track",
+        tracks: [
+          {
+            title: "Large track",
+            mediaUrl: "/api/audio?ticket=large",
+            extension: "wav",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/audio?ticket=large", (route) =>
+    route.fulfill({
+      json: { extension: "wav", parts: ["/api/media?ticket=large"] },
+    }),
+  );
+  let active = 0,
+    peak = 0;
+  await page.route("**/api/media?ticket=large", async (route) => {
+    const match = route
+      .request()
+      .headers()
+      .range.match(/bytes=(\d+)-(\d+)/)!;
+    const start = Number(match[1]),
+      end = Math.min(Number(match[2]), source.length - 1);
+    expect(end - start + 1).toBeLessThanOrEqual(2 * 1024 * 1024);
+    peak = Math.max(peak, ++active);
+    await new Promise((resolve) => setTimeout(resolve, (start % 3) * 15 + 30));
+    await route.fulfill({
+      status: 206,
+      body: source.subarray(start, end + 1),
+      contentType: "audio/wav",
+      headers: {
+        "Content-Range": `bytes ${start}-${end}/${source.length}`,
+        "X-Audio-More": end + 1 < source.length ? "1" : "0",
+      },
+    });
     active--;
   });
-  await page.goto('/');
-  await page.getByLabel('Music or playlist link').fill('https://artist.bandcamp.com/track/example');
-  await page.getByRole('button',{name:'Add music link'}).click();
-  await expect(page.getByText('Large track',{exact:true})).toBeVisible();
-  await expect(page.getByRole('dialog')).not.toBeVisible();
-  const waiting=page.waitForEvent('download',{timeout:20000});
-  await page.getByRole('button',{name:'Download track',exact:true}).click();
-  const result=await waiting;
+  await page.goto("/");
+  await page
+    .getByLabel("Music or playlist link")
+    .fill("https://artist.bandcamp.com/track/example");
+  await page.getByRole("button", { name: "Add music link" }).click();
+  await expect(page.getByText("Large track", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const waiting = page.waitForEvent("download", { timeout: 20000 });
+  await page
+    .getByRole("button", { name: "Download track", exact: true })
+    .click();
+  const result = await waiting;
   expect((await readFile((await result.path())!)).equals(source)).toBe(true);
   expect(peak).toBeGreaterThanOrEqual(2);
 });
 
-test('Original HLS audio is assembled and remuxed locally without transcoding',async({page})=>{
-  const wav=Buffer.from(await demoFile().arrayBuffer());
-  const stream=execFileSync('ffmpeg',['-v','error','-i','pipe:0','-c:a','aac','-f','mpegts','pipe:1'],{input:wav});
-  await page.route('**/api/resolve',route=>route.fulfill({json:{title:'HLS track',tracks:[{title:'HLS track',mediaUrl:'/api/audio?ticket=hls',extension:'m4a'}]}}));
-  await page.route('**/api/audio?ticket=hls',route=>route.fulfill({json:{extension:'ts',remuxTo:'m4a',parts:['/api/media?ticket=hls']}}));
-  await page.route('**/api/media?ticket=hls',route=>route.fulfill({status:206,body:stream,contentType:'video/mp2t',headers:{'Content-Range':`bytes 0-${stream.length-1}/${stream.length}`,'X-Audio-More':'0'}}));
-  await page.goto('/');
-  await page.getByLabel('Music or playlist link').fill('https://soundcloud.com/artist/track');
-  await page.getByRole('button',{name:'Add music link'}).click();
-  const waiting=page.waitForEvent('download',{timeout:20000});
-  await page.getByRole('button',{name:'Download track',exact:true}).click();
-  const result=await waiting;
-  expect(result.suggestedFilename()).toBe('HLS track.m4a');
-  const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_streams','-of','json',(await result.path())!],{encoding:'utf8'}));
-  expect(probe.streams[0].codec_name).toBe('aac');
+test("Original HLS audio is assembled and remuxed locally without transcoding", async ({
+  page,
+}) => {
+  const wav = Buffer.from(await demoFile().arrayBuffer());
+  const stream = execFileSync(
+    "ffmpeg",
+    ["-v", "error", "-i", "pipe:0", "-c:a", "aac", "-f", "mpegts", "pipe:1"],
+    { input: wav },
+  );
+  await page.route("**/api/resolve", (route) =>
+    route.fulfill({
+      json: {
+        title: "HLS track",
+        tracks: [
+          {
+            title: "HLS track",
+            mediaUrl: "/api/audio?ticket=hls",
+            extension: "m4a",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/audio?ticket=hls", (route) =>
+    route.fulfill({
+      json: {
+        extension: "ts",
+        remuxTo: "m4a",
+        parts: ["/api/media?ticket=hls"],
+      },
+    }),
+  );
+  await page.route("**/api/media?ticket=hls", (route) =>
+    route.fulfill({
+      status: 206,
+      body: stream,
+      contentType: "video/mp2t",
+      headers: {
+        "Content-Range": `bytes 0-${stream.length - 1}/${stream.length}`,
+        "X-Audio-More": "0",
+      },
+    }),
+  );
+  await page.goto("/");
+  await page
+    .getByLabel("Music or playlist link")
+    .fill("https://soundcloud.com/artist/track");
+  await page.getByRole("button", { name: "Add music link" }).click();
+  const waiting = page.waitForEvent("download", { timeout: 20000 });
+  await page
+    .getByRole("button", { name: "Download track", exact: true })
+    .click();
+  const result = await waiting;
+  expect(result.suggestedFilename()).toBe("HLS track.m4a");
+  const probe = JSON.parse(
+    execFileSync(
+      "ffprobe",
+      ["-v", "error", "-show_streams", "-of", "json", (await result.path())!],
+      { encoding: "utf8" },
+    ),
+  );
+  expect(probe.streams[0].codec_name).toBe("aac");
   expect(Number(probe.streams[0].duration)).toBeGreaterThan(4.9);
+});
+
+test("desktop helper wizard pairs and downloads without using the hosted source API", async ({
+  page,
+}) => {
+  const token = "a".repeat(43),
+    wav = Buffer.from(await demoFile().arrayBuffer());
+  let hostedSourceRequests = 0,
+    localSourceRequests = 0;
+  await page.route("**/api/helper-release", (route) =>
+    route.fulfill({ json: { windows: true, mac: true, linux: true } }),
+  );
+  await page.route("http://127.0.0.1:45821/**", async (route) => {
+    const request = route.request(),
+      path = new URL(request.url()).pathname;
+    const headers = {
+      "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+      "Access-Control-Allow-Headers": "Authorization, Content-Type, Range",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Expose-Headers": "Content-Range, X-Audio-More",
+    };
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers });
+      return;
+    }
+    expect(request.headers().authorization).toBe(`Bearer ${token}`);
+    if (path === "/health")
+      await route.fulfill({
+        json: { app: "MusicDownloader", ready: true },
+        headers,
+      });
+    else if (path === "/api/resolve") {
+      localSourceRequests++;
+      await route.fulfill({
+        json: {
+          title: "On this computer",
+          tracks: [
+            {
+              title: "Local connection",
+              mediaUrl: "/api/audio?ticket=local",
+              extension: "wav",
+            },
+          ],
+        },
+        headers,
+      });
+    } else if (path === "/api/audio")
+      await route.fulfill({
+        json: { extension: "wav", parts: ["/api/media?ticket=local"] },
+        headers,
+      });
+    else
+      await route.fulfill({
+        status: 206,
+        body: wav,
+        contentType: "audio/wav",
+        headers: {
+          ...headers,
+          "Content-Range": `bytes 0-${wav.length - 1}/${wav.length}`,
+          "X-Audio-More": "0",
+        },
+      });
+  });
+  await page.route("http://127.0.0.1:3000/api/resolve", (route) => {
+    hostedSourceRequests++;
+    return route.abort();
+  });
+  await page.goto(`/#helper_token=${token}&helper_port=45821`);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByText("Connected. Ready to download.")).toBeVisible();
+  await expect(page).not.toHaveURL(/helper_token/);
+  await page.getByLabel("Helper operating system").selectOption("windows");
+  await expect(
+    page.getByRole("link", { name: "Download helper .exe" }),
+  ).toHaveAttribute("href", /MusicDownloader-Helper-Windows.exe$/);
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page
+    .getByLabel("Music or playlist link")
+    .fill("https://music.youtube.com/watch?v=xKJtIjB3pAI");
+  await page.getByRole("button", { name: "Add music link" }).click();
+  await expect(
+    page.getByText("Local connection", { exact: true }),
+  ).toBeVisible();
+  const waiting = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Download track", exact: true })
+    .click();
+  const file = await waiting;
+  expect((await readFile((await file.path())!)).equals(wav)).toBe(true);
+  expect(localSourceRequests).toBe(1);
+  expect(hostedSourceRequests).toBe(0);
 });
