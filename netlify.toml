@@ -5,6 +5,10 @@
 [build.environment]
   NODE_VERSION = "22"
   NEXT_TELEMETRY_DISABLED = "1"
+  NETLIFY_NEXT_PLUGIN_SKIP = "false"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 # The Next.js adapter provisions the API routes as on-demand server functions.
 # Private, build-generated tool/key files must travel with those functions.
