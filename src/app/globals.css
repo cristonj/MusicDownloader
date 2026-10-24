@@ -1767,3 +1767,11 @@ input[type="checkbox"]:checked:after {
     font-size: 11px;
   }
 }
+
+/* Prevent mobile Safari from zooming the page when a form control is used. */
+@media (pointer: coarse) {
+  .minimal-shell input,
+  .minimal-shell select {
+    font-size: 16px !important;
+  }
+}

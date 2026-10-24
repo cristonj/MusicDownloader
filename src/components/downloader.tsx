@@ -116,7 +116,6 @@ export default function Downloader() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const files = useRef<HTMLInputElement>(null);
-  const linkInput = useRef<HTMLInputElement>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioUrl = useRef<string | null>(null);
   const dragDepth = useRef(0);
@@ -166,10 +165,10 @@ export default function Downloader() {
           last = targets[targets.length - 1];
         if (event.shiftKey && document.activeElement === first) {
           event.preventDefault();
-          last?.focus();
+          last?.focus({ preventScroll: true });
         } else if (!event.shiftKey && document.activeElement === last) {
           event.preventDefault();
-          first?.focus();
+          first?.focus({ preventScroll: true });
         }
       }
     };
@@ -177,13 +176,16 @@ export default function Downloader() {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     requestAnimationFrame(() =>
-      document.querySelector<HTMLElement>('[role="dialog"] button')?.focus(),
+      document
+        .querySelector<HTMLElement>('[role="dialog"] button')
+        ?.focus({ preventScroll: true }),
     );
     window.addEventListener("keydown", keydown);
     return () => {
       window.removeEventListener("keydown", keydown);
       document.body.style.overflow = previousOverflow;
-      previous?.focus();
+      if (previous?.matches("button, a[href], [tabindex]"))
+        previous.focus({ preventScroll: true });
     };
   }, [library.settingsOpen, helpOpen]);
 
@@ -225,10 +227,8 @@ export default function Downloader() {
   const paste = async () => {
     try {
       setInput(await navigator.clipboard.readText());
-      linkInput.current?.focus();
     } catch {
       library.notify("Paste a link into the field with Ctrl+V or ⌘V.");
-      linkInput.current?.focus();
     }
   };
 
@@ -282,7 +282,6 @@ export default function Downloader() {
               <div className="link-field">
                 <Link2 size={20} className="input-link-icon" />
                 <input
-                  ref={linkInput}
                   aria-label="Music or playlist link"
                   placeholder={
                     activeProvider
@@ -330,7 +329,6 @@ export default function Downloader() {
                       setActiveProvider(
                         activeProvider === provider ? null : provider,
                       );
-                      linkInput.current?.focus();
                     }}
                     aria-pressed={activeProvider === provider}
                   >
