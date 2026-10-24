@@ -1,0 +1,9 @@
+services:
+  music:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+    restart: unless-stopped
+    init: true

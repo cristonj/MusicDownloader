@@ -1,0 +1,10 @@
+.git
+node_modules
+.next
+out
+resolver/.venv
+**/__pycache__
+public/ffmpeg
+test-results
+playwright-report
+.env*
