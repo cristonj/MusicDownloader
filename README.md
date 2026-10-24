@@ -23,11 +23,6 @@ npm run dev
 
 Node 22+ is needed only for development/building, not to run a packaged helper. Netlify remains the web-app host; the hosted APIs are available when a helper is not connected. Run `npm run build:helper` to create the native self-contained executable under `helper-dist/`. GitHub Actions builds Windows, Linux, and both Mac architectures, checks the bundled runtimes with an empty PATH, and publishes the wizard's downloads.
 
-```sh
-npm ci
-npm run dev
-```
-
 Open http://localhost:3000. Source access without the helper depends on the hosted server being accepted by the provider. The production desktop helper pairs only with https://musicdownloaderapp.netlify.app.
 
 For Netlify, connect the repository and deploy. `netlify.toml` builds the complete Next.js application; Netlify's Next.js adapter runs the API routes on demand. There are no required environment variables or additional services to configure. Alternatively, `docker compose up --build` runs the whole app on http://localhost:8080.

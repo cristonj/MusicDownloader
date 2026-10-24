@@ -142,13 +142,19 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
           <li>
             <strong>Open the download</strong>
             <p>
-              {platform !== "windows"
+              {platform === "mac"
                 ? "Unzip and open MusicDownloader Helper."
-                : "Open MusicDownloader Helper."}{" "}
+                : platform === "linux"
+                  ? "Extract and open MusicDownloader-Helper."
+                  : "Open MusicDownloader Helper."}{" "}
               Keep it running while you download.
             </p>
             <small>
-              Your system may ask you to allow this unsigned helper.
+              {platform === "windows"
+                ? "If Windows warns: More info → Run anyway."
+                : platform === "mac"
+                  ? "If blocked: System Settings → Privacy & Security → Open Anyway."
+                  : "Your system may ask you to allow this unsigned helper."}
             </small>
           </li>
           <li>
