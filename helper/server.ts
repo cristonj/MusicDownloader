@@ -77,7 +77,7 @@ export function startHelper(options: {
       if (url.pathname === "/health") {
         respond(200, {
           app: "MusicDownloader",
-          version: 2,
+          version: 3,
           ...options.state(),
         });
         return;
