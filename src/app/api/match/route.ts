@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
-    guardRequest(request, 150);
+    guardRequest(request, 600);
     const data = await readBody(request);
     if (typeof data.ticket !== "string")
       throw new HttpError(400, "A track is required.");

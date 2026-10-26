@@ -6,6 +6,7 @@ import {
   helperConnection,
   helperFetch,
   disconnectHelper,
+  helperOutdated,
 } from "@/lib/helper";
 
 export default function HelperSetup({ onClose }: { onClose: () => void }) {
@@ -54,6 +55,10 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
       if (!response.ok)
         throw new Error(value.detail || "Open the helper again to reconnect.");
       if (value.error) throw new Error(value.error);
+      if (helperOutdated(value))
+        throw new Error(
+          "Your helper is out of date. Quit it, download the new one above, and open it.",
+        );
       setReady(value.ready === true);
       setStatus(
         value.ready

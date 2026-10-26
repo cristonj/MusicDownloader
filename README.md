@@ -30,7 +30,7 @@ For Netlify, connect the repository and deploy. `netlify.toml` builds the comple
 ## Downloads
 
 - YouTube songs/playlists, SoundCloud tracks/sets, and public Bandcamp tracks/albums use the connected desktop helper, or the hosted API when no helper is connected.
-- Spotify public songs, albums, and playlists import metadata without an API key, then match to YouTube recordings. Review the visible matches and select the recordings to download. Unmatched entries stay visible; private/unavailable tracks are not silently replaced.
+- Spotify public songs, albums, and playlists import metadata without an API key, then match to YouTube recordings. Each match names the YouTube upload and channel it came from and why it was chosen. Only official uploads (artist channel, "- Topic", VEVO) with the same length are auto-selected; fan uploads are labelled and left for review. Spotify's public view lists at most 100 tracks of a playlist, and the app says so when it applies. Unmatched entries stay visible; private/unavailable tracks are not silently replaced.
 - Local files stay on the device. Direct audio URLs also work when their server permits browser access.
 - Original, MP3, AAC/M4A, FLAC, WAV, OGG/Vorbis, Opus, and AIFF. Lossy bitrate, lossless bit depth, and sample rate where supported. Increasing output settings cannot recover detail missing from the source.
 - Select several tracks for a ZIP. Conversion and ZIP creation use browser workers. No accounts, database, analytics, or uploaded local files.
@@ -47,7 +47,7 @@ Each server invocation has a bounded timeout. Public source URLs and CDN hosts a
 
 Availability, region restrictions, anti-bot checks, and upstream metadata/extractor changes can still prevent individual downloads. Encrypted/live streams and private or paid-only files require your originals. Spotify metadata embeds may be unavailable or incomplete; use a smaller public playlist when the source does not expose the full list. There is no claim to download or decrypt Spotify streams.
 
-Browser limits: 100 tracks, 150 MB per input, 450 MB retained collection. Phones may need smaller lossless batches. Tracks disappear on refresh; only audio preferences persist. Use music you own or have permission to download.
+Browser limits: 150 MB per input, 450 MB retained collection. Playlists have no track cap; long ones show import progress. Phones may need smaller lossless batches. Tracks disappear on refresh; only audio preferences persist. Use music you own or have permission to download.
 
 ## Checks
 

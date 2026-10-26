@@ -606,6 +606,31 @@ input[type="checkbox"]:checked:after {
 .match-source:hover {
   text-decoration: underline;
 }
+.match-reason {
+  font-size: 9px;
+  color: #93a07f;
+  line-height: 1.5;
+}
+.import-progress {
+  margin-top: 8px;
+}
+.import-progress.indeterminate > span {
+  width: 30%;
+  animation: import-slide 1.2s ease-in-out infinite;
+}
+@keyframes import-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .import-progress.indeterminate > span {
+    animation: none;
+  }
+}
 .track-error-message {
   font-size: 10px;
   color: var(--red);

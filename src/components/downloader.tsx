@@ -470,10 +470,27 @@ export default function Downloader() {
             </div>
           )}
           {resolving && (
-            <div className="operation-status" role="status">
-              <LoaderCircle size={16} className="spin" />
-              <span>Finding your music & matching sources…</span>
-              <button onClick={library.cancel}>Cancel</button>
+            <div className="import-status" role="status">
+              <div className="operation-status">
+                <LoaderCircle size={16} className="spin" />
+                <span>
+                  {library.importProgress
+                    ? `${library.importProgress.label} · ${library.importProgress.done} of ${library.importProgress.total}`
+                    : "Opening your link…"}
+                </span>
+                <button onClick={library.cancel}>Cancel</button>
+              </div>
+              <div
+                className={`track-progress import-progress ${library.importProgress ? "" : "indeterminate"}`}
+              >
+                <span
+                  style={{
+                    width: library.importProgress
+                      ? `${(library.importProgress.done / library.importProgress.total) * 100}%`
+                      : undefined,
+                  }}
+                />
+              </div>
             </div>
           )}
 
@@ -557,16 +574,41 @@ export default function Downloader() {
                             </>
                           )}
                         </div>
-                        {track.matchedTitle && (
-                          <a
-                            className="match-source"
-                            href={track.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            YouTube match: {track.matchedTitle}{" "}
-                            <ExternalLink size={10} />
-                          </a>
+                        {track.matchedTitle ? (
+                          <>
+                            <a
+                              className="match-source"
+                              href={track.sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              YouTube match: {track.matchedTitle}
+                              {track.matchConfidence !== undefined &&
+                                ` · ${Math.round(track.matchConfidence * 100)}%`}{" "}
+                              <ExternalLink size={10} />
+                            </a>
+                            {track.matchReason && (
+                              <span className="match-reason">
+                                {track.matchReason}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          track.sourceUrl && (
+                            <a
+                              className="match-source"
+                              href={track.sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Exact source:{" "}
+                              {track.sourceUrl.replace(
+                                /^https:\/\/(www\.)?/,
+                                "",
+                              )}{" "}
+                              <ExternalLink size={10} />
+                            </a>
+                          )
                         )}
                         {track.error && (
                           <span className="track-error-message">
@@ -740,8 +782,8 @@ export default function Downloader() {
                     <section>
                       <strong>Keep a song. Or the whole set.</strong>
                       <p>
-                        Download a track or select several for a ZIP. Up to 100
-                        tracks, 150 MB per track, and 450 MB per collection.
+                        Download a track or select several for a ZIP. Up to 150
+                        MB per track and 450 MB per download.
                       </p>
                     </section>
                   </div>

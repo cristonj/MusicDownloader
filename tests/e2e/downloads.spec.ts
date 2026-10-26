@@ -443,7 +443,7 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     expect(request.headers().authorization).toBe(`Bearer ${token}`);
     if (path === "/health")
       await route.fulfill({
-        json: { app: "MusicDownloader", ready: true },
+        json: { app: "MusicDownloader", version: 2, ready: true },
         headers,
       });
     else if (path === "/api/resolve") {

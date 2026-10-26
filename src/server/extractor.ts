@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MAX_TRACKS } from "@/lib/model";
 import { HttpError } from "./security";
 import { extractionFailure, ExtractionError } from "./extraction-error";
 export interface Extracted {
@@ -8,6 +10,7 @@ export interface Extracted {
   track?: string;
   artist?: string;
   uploader?: string;
+  uploader_id?: string;
   channel?: string;
   duration?: number;
   url?: string;
@@ -21,6 +24,7 @@ export interface Extracted {
   fragment_base_url?: string;
   http_headers?: Record<string, string>;
   entries?: Extracted[];
+  formats?: unknown[];
   filesize?: number;
   filesize_approx?: number;
 }
@@ -39,7 +43,9 @@ async function extractUncached(
   );
   const args = [
     "--ignore-config",
-    "--no-cache-dir",
+    // Reuse SoundCloud client IDs and YouTube player data across runs.
+    "--cache-dir",
+    join(tmpdir(), "musicdownloader-yt-dlp"),
     "--no-warnings",
     "--no-progress",
     "--socket-timeout",
@@ -64,7 +70,7 @@ async function extractUncached(
     args.push(
       "--flat-playlist",
       "--playlist-end",
-      "101",
+      String(MAX_TRACKS + 1),
       "--ignore-no-formats-error",
     );
   else args.push("--no-playlist");
@@ -116,7 +122,7 @@ async function extractUncached(
     signal?.addEventListener("abort", abort, { once: true });
     process.stdout.on("data", (chunk: Buffer) => {
       bytes += chunk.length;
-      if (bytes > 4 * 1024 * 1024) {
+      if (bytes > 64 * 1024 * 1024) {
         process.kill("SIGKILL");
         finish(new HttpError(422, "This playlist is too large."));
       } else chunks.push(chunk);
