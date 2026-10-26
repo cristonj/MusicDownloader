@@ -33,6 +33,8 @@ export function useLibrary() {
     label: string;
   } | null>(null);
   const [status, setStatus] = useState("");
+  // The tracks in the latest export, kept afterwards for its summary.
+  const [exportIds, setExportIds] = useState<string[]>([]);
   const [notice, setNotice] = useState<{
     text: string;
     kind: "error" | "info" | "success";
@@ -196,6 +198,7 @@ export function useLibrary() {
     running.current = true;
     setBusy(true);
     setNotice(null);
+    setExportIds(selected.map((t) => t.id));
     const controller = new AbortController();
     abort.current = controller;
     const signal = controller.signal;
@@ -378,6 +381,7 @@ export function useLibrary() {
     resolving,
     importProgress,
     status,
+    exportIds,
     notice,
     settingsOpen,
     helperOpen,
