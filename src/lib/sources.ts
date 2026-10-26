@@ -1,4 +1,8 @@
-import { helperConnection, HelperRequiredError, sourceFetch } from "./helper";
+import {
+  helperConnection,
+  HelperRequiredError,
+  sourceFetch as directFetch,
+} from "./helper";
 import {
   extensionFor,
   isMediaHost,
@@ -9,6 +13,31 @@ import {
   type Track,
 } from "./model";
 
+const wait = (ms: number, signal?: AbortSignal | null) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    });
+  });
+// Large batches can briefly exceed the server's request budget or meet a busy
+// source. Back off and retry instead of failing the track.
+async function sourceFetch(
+  ...args: Parameters<typeof directFetch>
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const response = await directFetch(...args);
+    if (![429, 502, 503, 504].includes(response.status) || attempt >= 5)
+      return response;
+    await response.body?.cancel().catch(() => {});
+    const after = Number(response.headers.get("retry-after")) * 1000;
+    await wait(
+      after || Math.min(15000, 1000 * 2 ** attempt + Math.random() * 1000),
+      args[1]?.signal,
+    );
+  }
+}
 export function localTrack(file: File): Track {
   if (file.size > MAX_FILE_BYTES)
     throw new Error(`${file.name} is over the 150 MB per-track limit.`);
@@ -241,7 +270,21 @@ export async function fetchAudio(
   onProgress: (progress: number) => void,
 ): Promise<AudioInput> {
   try {
-    return await fetchSourceAudio(track, signal, onProgress);
+    try {
+      return await fetchSourceAudio(track, signal, onProgress);
+    } catch (error) {
+      // Signed CDN links expire and transfers drop; a fresh manifest from the
+      // same source usually works, so try that before another provider.
+      if (
+        signal.aborted ||
+        !/expired|interrupted|try again|unavailable/i.test(
+          error instanceof Error ? error.message : "",
+        )
+      )
+        throw error;
+      await wait(1500, signal);
+      return await fetchSourceAudio(track, signal, onProgress);
+    }
   } catch (error) {
     if (
       signal.aborted ||

@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     AbortSignal.timeout(52000),
   ]);
   try {
-    guardRequest(request, 150);
+    guardRequest(request, 600);
     const ticket = readTicket(
       new URL(request.url).searchParams.get("ticket") || "",
       "source",
