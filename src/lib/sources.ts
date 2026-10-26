@@ -1,6 +1,7 @@
 import { helperConnection, HelperRequiredError, sourceFetch } from "./helper";
 import {
   extensionFor,
+  isMediaHost,
   MAX_FILE_BYTES,
   MAX_TRACKS,
   parseUrl,
@@ -250,20 +251,7 @@ export async function fetchAudio(
     throw new Error("This source returned an invalid audio stream.");
   if (track.transport === "helper" && typeof manifest.browserUrl === "string") {
     const remote = parseUrl(manifest.browserUrl);
-    if (
-      remote.protocol === "https:" &&
-      [
-        "googlevideo.com",
-        "sndcdn.com",
-        "bcbits.com",
-        "bandcamp.com",
-        "youtube.com",
-        "soundcloud.com",
-      ].some(
-        (host) =>
-          remote.hostname === host || remote.hostname.endsWith(`.${host}`),
-      )
-    ) {
+    if (remote.protocol === "https:" && isMediaHost(remote.hostname)) {
       try {
         const direct = await fetchDirectAudio(
           { ...track, mediaUrl: remote.href, extension: manifest.extension },

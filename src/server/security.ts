@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { providerFor } from "@/lib/model";
+import { isMediaHost, providerFor } from "@/lib/model";
 export class HttpError extends Error {
   constructor(
     public status: number,
@@ -98,14 +98,6 @@ export function allowedSource(value: string): URL {
   }
   return url;
 }
-const mediaDomains = [
-  "googlevideo.com",
-  "youtube.com",
-  "sndcdn.com",
-  "soundcloud.com",
-  "bcbits.com",
-  "bandcamp.com",
-];
 export function allowedMedia(value: string): URL {
   const url = new URL(value);
   if (
@@ -113,9 +105,7 @@ export function allowedMedia(value: string): URL {
     url.username ||
     url.password ||
     (url.port && url.port !== "443") ||
-    !mediaDomains.some(
-      (host) => url.hostname === host || url.hostname.endsWith(`.${host}`),
-    )
+    !isMediaHost(url.hostname)
   )
     throw new HttpError(422, "This source returned an unsupported audio host.");
   return url;
@@ -123,7 +113,14 @@ export function allowedMedia(value: string): URL {
 const buckets = new Map<string, { time: number; count: number }>();
 export function guardRequest(request: Request, limit = 600) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
+  // A self-hosted server sees its bind address (0.0.0.0) in request.url, so
+  // also accept the Host the browser actually addressed.
+  const hosts = [new URL(request.url).host, request.headers.get("host")];
+  let originHost: string | undefined;
+  try {
+    originHost = origin ? new URL(origin).host : undefined;
+  } catch {}
+  if (origin && (!originHost || !hosts.includes(originHost)))
     throw new HttpError(403, "Cross-origin requests are not allowed.");
   if (request.headers.get("sec-fetch-site") === "cross-site")
     throw new HttpError(403, "Cross-site requests are not allowed.");

@@ -1,4 +1,4 @@
-import { MAX_TRACKS } from "@/lib/model";
+import { MAX_TRACKS, providerFor } from "@/lib/model";
 import { allowedSource, HttpError, signTicket } from "./security";
 import { extract, type Extracted } from "./extractor";
 import { spotifyMetadata } from "./spotify";
@@ -95,6 +95,7 @@ async function completeStubs(entries: Extracted[], signal?: AbortSignal) {
             duration: found.duration ?? entry.duration,
             webpage_url: found.webpage_url,
             ext: found.ext,
+            formats: found.formats,
           };
         } catch {
           // Keep the original link; the track still downloads without a title.
@@ -130,6 +131,16 @@ export async function resolveCatalog(value: string, signal?: AbortSignal) {
     };
     if (entry.is_live)
       return { ...track, error: "Live streams cannot be downloaded." };
+    // SoundCloud lists DRM-only tracks with no formats rather than failing.
+    if (
+      providerFor(url) === "SoundCloud" &&
+      Array.isArray(entry.formats) &&
+      !entry.formats.length
+    )
+      return {
+        ...track,
+        error: "SoundCloud doesn’t allow this track to be downloaded (DRM).",
+      };
     let source = entry.webpage_url || entry.url || url.href;
     if (/^[a-zA-Z0-9_-]{11}$/.test(source))
       source = `https://www.youtube.com/watch?v=${source}`;

@@ -1,4 +1,8 @@
 export const HELPER_PORT = 45821;
+// Bump with helper/server.ts when the helper needs a fix the app relies on.
+export const HELPER_VERSION = 2;
+export const helperOutdated = (health: { version?: unknown }) =>
+  typeof health.version !== "number" || health.version < HELPER_VERSION;
 const KEY = "music-downloader:helper";
 export class HelperRequiredError extends Error {}
 interface Connection {

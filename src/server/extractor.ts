@@ -21,6 +21,7 @@ export interface Extracted {
   fragment_base_url?: string;
   http_headers?: Record<string, string>;
   entries?: Extracted[];
+  formats?: unknown[];
   filesize?: number;
   filesize_approx?: number;
 }

@@ -121,7 +121,9 @@ export async function hlsManifest(
   }
   if (!parts.length) throw new HttpError(422, "No audio segments were found.");
   return {
-    extension: "ts",
+    extension: lines.some((line) => line.startsWith("#EXT-X-MAP:"))
+      ? "mp4"
+      : "ts",
     remuxTo: audioExtension(codec),
     parts,
   };

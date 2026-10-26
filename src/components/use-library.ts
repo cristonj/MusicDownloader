@@ -7,11 +7,18 @@ import {
   MAX_TRACKS,
   outputFilename,
   readPreferences,
+  safeFilename,
   type Preferences,
   type Track,
 } from "@/lib/model";
 import { fetchAudio, localTrack, resolveLink } from "@/lib/sources";
-import { consumeHelperPair, HelperRequiredError } from "@/lib/helper";
+import {
+  consumeHelperPair,
+  helperConnection,
+  helperFetch,
+  helperOutdated,
+  HelperRequiredError,
+} from "@/lib/helper";
 import { cancelConversion, convertAudio, makeZip, saveBlob } from "@/lib/audio";
 
 export function useLibrary() {
@@ -38,6 +45,13 @@ export function useLibrary() {
   useEffect(() => {
     try {
       if (consumeHelperPair()) setHelperOpen(true);
+      else if (helperConnection())
+        helperFetch("/health", { signal: AbortSignal.timeout(5000) })
+          .then((response) => response.json())
+          .then((health) => {
+            if (helperOutdated(health)) setHelperOpen(true);
+          })
+          .catch(() => {});
       const saved = readPreferences(
         localStorage.getItem("music-downloader:preferences"),
       );
@@ -304,7 +318,10 @@ export function useLibrary() {
       if (zip) {
         setStatus("Packing your ZIP on this device…");
         const blob = await makeZip(results, signal);
-        saveBlob(blob, "MusicDownloader.zip");
+        saveBlob(
+          blob,
+          `${collection === "Your collection" ? "MusicDownloader" : safeFilename(collection)}.zip`,
+        );
         notify(
           `${results.length} track${results.length === 1 ? "" : "s"} · ${bytesLabel(blob.size)} · ZIP saved${failures ? `. ${failures} track(s) failed; only successful tracks are included.` : "."}`,
           failures ? "error" : "success",

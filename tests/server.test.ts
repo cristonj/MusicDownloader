@@ -69,6 +69,17 @@ describe("private server endpoints", () => {
       }),
     );
     expect(forbidden.status).toBe(403);
+    // Self-hosted servers see their bind address in request.url.
+    const selfHosted = (origin: string) =>
+      guardRequest(
+        new Request("http://0.0.0.0:8080/api/resolve", {
+          method: "POST",
+          headers: { Origin: origin, Host: "localhost:8080" },
+        }),
+      );
+    expect(() => selfHosted("http://localhost:8080")).not.toThrow();
+    expect(() => selfHosted("https://other.test")).toThrow("Cross-origin");
+    expect(() => selfHosted("null")).toThrow("Cross-origin");
     const tooLarge = await resolve(
       new Request("http://localhost/api/resolve", {
         method: "POST",
@@ -109,6 +120,7 @@ describe("private server endpoints", () => {
               },
               { id: "12", url: "https://api-v2.soundcloud.com/tracks/12" },
               { id: "13", url: "https://api-v2.soundcloud.com/tracks/13" },
+              { id: "14", url: "https://api-v2.soundcloud.com/tracks/14" },
             ],
           }
         : url.endsWith("/12")
@@ -117,7 +129,9 @@ describe("private server endpoints", () => {
               uploader: "Artist",
               webpage_url: "https://soundcloud.com/artist/second",
             }
-          : Promise.reject(new Error("unavailable")),
+          : url.endsWith("/14")
+            ? { title: "Locked", formats: [] }
+            : Promise.reject(new Error("unavailable")),
     );
     const response = await resolve(
       new Request("http://localhost/api/resolve", {
@@ -130,13 +144,18 @@ describe("private server endpoints", () => {
       "First",
       "Second",
       "Untitled",
+      "Locked",
     ]);
+    expect(tracks[3].error).toMatch(/DRM/);
+    expect(tracks[3].mediaUrl).toBeUndefined();
     expect(tracks[1]).toMatchObject({
       artist: "Artist",
       sourceUrl: "https://soundcloud.com/artist/second",
     });
     expect(tracks[2].sourceUrl).toBe("https://api-v2.soundcloud.com/tracks/13");
-    expect(tracks.every((x: { mediaUrl?: string }) => x.mediaUrl)).toBe(true);
+    expect(
+      tracks.slice(0, 3).every((x: { mediaUrl?: string }) => x.mediaUrl),
+    ).toBe(true);
     expect(() =>
       allowedSource("https://api-v2.soundcloud.com/me/likes"),
     ).toThrow();
@@ -326,6 +345,22 @@ describe("bounded audio transport", () => {
     );
     expect(second.url).toBe("https://cf-media.sndcdn.com/audio.mp4");
     expect(second.range).toEqual([10, 29]);
+    expect(result.extension).toBe("mp4");
+  });
+  it("accepts SoundCloud's current HLS host", async () => {
+    vi.mocked(mediaFetch).mockResolvedValue(
+      new Response(
+        '#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\ndata000.m4s\n#EXT-X-ENDLIST',
+      ),
+    );
+    const result = await hlsManifest(
+      "https://playback.media-streaming.soundcloud.cloud/a/aac_96k/b/playlist.m3u8",
+      {},
+    );
+    expect(result).toMatchObject({ extension: "mp4", remuxTo: "m4a" });
+    expect(() =>
+      allowedMedia("https://soundcloud.cloud.attacker.test/a.m4s"),
+    ).toThrow();
   });
   it("rejects encrypted/live HLS and malformed ticket requests", async () => {
     vi.mocked(mediaFetch).mockResolvedValueOnce(
@@ -344,5 +379,17 @@ describe("bounded audio transport", () => {
       (await media(new Request("http://localhost/api/media?ticket=bad")))
         .status,
     ).toBe(403);
+  });
+});
+describe("extraction failures", () => {
+  it("explains DRM-protected tracks", async () => {
+    const { extractionFailure } =
+      await import("../src/server/extraction-error");
+    expect(
+      extractionFailure(
+        "ERROR: [soundcloud] 1: This video is DRM protected",
+        false,
+      ).message,
+    ).toMatch(/DRM-protected/);
   });
 });
