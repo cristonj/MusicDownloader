@@ -136,9 +136,10 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
     .fill("https://open.spotify.com/playlist/1234567890123456789012");
   await page.getByRole("button", { name: "Add music link" }).click();
   await expect(page.getByText("A favorite", { exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: /YouTube match/ }),
-  ).toHaveAttribute("href", "https://www.youtube.com/watch?v=abcdefghijk");
+  await expect(page.getByRole("link", { name: /Match:/ })).toHaveAttribute(
+    "href",
+    "https://www.youtube.com/watch?v=abcdefghijk",
+  );
   await expect(
     page.getByLabel("Select A favorite", { exact: true }),
   ).not.toBeChecked();
