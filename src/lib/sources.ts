@@ -102,7 +102,8 @@ export async function resolveLink(
           : [],
   );
   const label =
-    provider === "Spotify"
+    provider === "Spotify" ||
+    jobs.every((job: { path: string }) => job.path === "/api/match")
       ? "Matching tracks on YouTube"
       : "Loading track details";
   let next = 0,
@@ -125,12 +126,23 @@ export async function resolveLink(
             transport,
           );
           const found = await response.json();
-          if (response.ok) result.tracks[job.index] = { ...item, ...found };
+          // A DRM-locked track keeps its reason if no other upload is found.
+          if (response.ok)
+            result.tracks[job.index] = {
+              ...item,
+              ...found,
+              error:
+                found.error && item.error
+                  ? `${item.error} ${found.error}`
+                  : found.error,
+            };
           // A failed lookup keeps its playable link; a failed match has none.
           else if (job.path === "/api/match")
             result.tracks[job.index] = {
               ...item,
-              error: found.detail || "No audio match found.",
+              error: [item.error, found.detail || "No audio match found."]
+                .filter(Boolean)
+                .join(" "),
             };
         } catch (error) {
           if (signal.aborted) throw error;
@@ -193,6 +205,10 @@ export async function resolveLink(
         typeof item.matchReason === "string"
           ? item.matchReason.slice(0, 300)
           : undefined,
+      fallbackTicket:
+        typeof item.fallbackTicket === "string"
+          ? item.fallbackTicket
+          : undefined,
       // Only confident matches start selected; the rest wait for review.
       selected:
         !item.error && (provider !== "Spotify" || item.matchConfident === true),
@@ -216,7 +232,58 @@ export interface AudioInput {
   extension: string;
   remuxTo?: string;
 }
+// A source can refuse audio only once the stream is opened (DRM, removal,
+// region or bot blocks). Rather than give up, download the closest upload of
+// the same recording found on YouTube.
 export async function fetchAudio(
+  track: Track,
+  signal: AbortSignal,
+  onProgress: (progress: number) => void,
+): Promise<AudioInput> {
+  try {
+    return await fetchSourceAudio(track, signal, onProgress);
+  } catch (error) {
+    if (
+      signal.aborted ||
+      !track.fallbackTicket ||
+      /memory|limit|exceeds/i.test(error instanceof Error ? error.message : "")
+    )
+      throw error;
+    const response = await sourceFetch(
+      "/api/match",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticket: track.fallbackTicket }),
+        signal,
+      },
+      track.transport,
+    );
+    const found = await response.json().catch(() => null);
+    if (
+      !response.ok ||
+      typeof found?.mediaUrl !== "string" ||
+      !found.mediaUrl.startsWith("/api/audio?ticket=") ||
+      found.sourceUrl === track.sourceUrl
+    )
+      throw new Error(
+        `${(error as Error).message} ${found?.error || found?.detail || "No other upload of this track was found."}`,
+      );
+    return fetchSourceAudio(
+      {
+        ...track,
+        mediaUrl: found.mediaUrl,
+        sourceUrl:
+          typeof found.sourceUrl === "string" ? found.sourceUrl : undefined,
+        extension: "m4a",
+        fallbackTicket: undefined,
+      },
+      signal,
+      onProgress,
+    );
+  }
+}
+async function fetchSourceAudio(
   track: Track,
   signal: AbortSignal,
   onProgress: (progress: number) => void,

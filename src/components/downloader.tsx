@@ -31,6 +31,7 @@ import {
   type Provider,
   type Track,
 } from "@/lib/model";
+import { fetchAudio } from "@/lib/sources";
 import HelperSetup from "./helper-setup";
 import { useLibrary } from "./use-library";
 
@@ -115,6 +116,10 @@ export default function Downloader() {
   const [activeProvider, setActiveProvider] = useState<Provider | null>(null);
   const [dragging, setDragging] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const previewLoad = useRef<AbortController | null>(null);
+  // Fetched previews are kept so replaying a track doesn't download it again.
+  const previews = useRef(new Map<string, Blob>());
   const [helpOpen, setHelpOpen] = useState(false);
   const files = useRef<HTMLInputElement>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -132,6 +137,9 @@ export default function Downloader() {
         : `${prefs.bitrate} kbps`;
 
   const stopAudio = () => {
+    previewLoad.current?.abort();
+    previewLoad.current = null;
+    setLoadingId(null);
     audio.current?.pause();
     audio.current = null;
     if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
@@ -192,12 +200,36 @@ export default function Downloader() {
   }, [library.settingsOpen, helpOpen, library.helperOpen]);
 
   const preview = async (track: Track) => {
-    if (playingId === track.id) {
+    if (playingId === track.id || loadingId === track.id) {
       stopAudio();
       return;
     }
     stopAudio();
-    const blob = track.output || track.file;
+    let blob = track.output || track.file || previews.current.get(track.id);
+    // Service tracks stream through signed manifests the audio element can't
+    // play directly, so fetch the audio on this device first.
+    if (!blob && track.mediaUrl?.startsWith("/api/audio?ticket=")) {
+      const controller = new AbortController();
+      previewLoad.current = controller;
+      setLoadingId(track.id);
+      try {
+        blob = (await fetchAudio(track, controller.signal, () => {})).blob;
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setLoadingId(null);
+        library.notify(
+          `Preview unavailable: ${(error as Error).message}`,
+          "error",
+        );
+        return;
+      }
+      if (controller.signal.aborted) return;
+      previewLoad.current = null;
+      setLoadingId(null);
+      previews.current.set(track.id, blob);
+      while (previews.current.size > 5)
+        previews.current.delete(previews.current.keys().next().value!);
+    }
     const source = blob ? URL.createObjectURL(blob) : track.mediaUrl;
     if (!source) return;
     if (blob) audioUrl.current = source;
@@ -553,10 +585,14 @@ export default function Downloader() {
                       <button
                         className={`track-art art-${index % 4} ${playingId === track.id ? "is-playing" : ""}`}
                         onClick={() => preview(track)}
-                        disabled={!track.file && !track.output}
-                        aria-label={`${playingId === track.id ? "Pause" : "Preview"} ${track.title}`}
+                        disabled={
+                          !track.file && !track.output && !track.mediaUrl
+                        }
+                        aria-label={`${playingId === track.id || loadingId === track.id ? "Stop" : "Preview"} ${track.title}`}
                       >
-                        {playingId === track.id ? (
+                        {loadingId === track.id ? (
+                          <LoaderCircle size={17} className="spin" />
+                        ) : playingId === track.id ? (
                           <Pause size={17} fill="currentColor" />
                         ) : (
                           <Play size={17} fill="currentColor" />
@@ -582,7 +618,7 @@ export default function Downloader() {
                               target="_blank"
                               rel="noreferrer"
                             >
-                              YouTube match: {track.matchedTitle}
+                              Match: {track.matchedTitle}
                               {track.matchConfidence !== undefined &&
                                 ` · ${Math.round(track.matchConfidence * 100)}%`}{" "}
                               <ExternalLink size={10} />

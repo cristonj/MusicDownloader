@@ -22,6 +22,8 @@ type MatchTicket = {
   title: string;
   artist: string;
   duration?: number;
+  // The provider whose audio failed, when this ticket is a fallback search.
+  origin?: string;
 };
 type LookupTicket = { kind: "lookup"; url: string };
 type Ticket = SourceTicket | MediaTicket | MatchTicket | LookupTicket;
