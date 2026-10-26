@@ -129,6 +129,39 @@ export default function Downloader() {
   const locked = busy || resolving || !library.hydrated;
   const formatLabel = formats.find((f) => f.value === prefs.format)?.label;
   const finished = tracks.filter((t) => t.status === "done").length;
+  const exportTracks = tracks.filter((t) => library.exportIds.includes(t.id));
+  const exportDone = exportTracks.filter((t) => t.status === "done");
+  const exportFailed = exportTracks.filter((t) => t.status === "error");
+  const overall = exportTracks.length
+    ? exportTracks.reduce(
+        (sum, t) =>
+          sum +
+          (t.status === "done" || t.status === "error" ? 1 : t.progress || 0),
+        0,
+      ) / exportTracks.length
+    : 0;
+  // How sure each exported track is of being the right recording.
+  const matchBuckets: [string, number][] = [
+    ["exact source", (t: Track) => t.matchConfidence === undefined],
+    ["100% match", (t: Track) => (t.matchConfidence ?? 0) >= 0.995],
+    [
+      "75%+ match",
+      (t: Track) =>
+        (t.matchConfidence ?? 0) >= 0.75 && (t.matchConfidence ?? 0) < 0.995,
+    ],
+    [
+      "50–74% match",
+      (t: Track) =>
+        (t.matchConfidence ?? 0) >= 0.5 && (t.matchConfidence ?? 0) < 0.75,
+    ],
+    [
+      "<50% match",
+      (t: Track) => t.matchConfidence !== undefined && t.matchConfidence < 0.5,
+    ],
+  ].map(([label, test]) => [
+    label as string,
+    exportDone.filter(test as (t: Track) => boolean).length,
+  ]);
   const formatQuality =
     prefs.format === "original"
       ? "Source quality"
@@ -730,10 +763,54 @@ export default function Downloader() {
                     </button>
                   )}
                 </div>
-                {busy && (
-                  <div className="operation-status export-status" role="status">
-                    <LoaderCircle size={15} className="spin" />
-                    <span>{library.status}</span>
+                {exportTracks.length > 0 && (
+                  <div className="export-progress" role="status">
+                    <div className="export-progress-head">
+                      <span>
+                        {busy && <LoaderCircle size={13} className="spin" />}
+                        {busy
+                          ? library.status || "Preparing export…"
+                          : "Last export"}
+                      </span>
+                      <strong>{Math.round(overall * 100)}%</strong>
+                    </div>
+                    <div
+                      className="export-progress-track"
+                      aria-label="Export progress"
+                    >
+                      <div
+                        className="export-progress-fill"
+                        style={{ width: `${overall * 100}%` }}
+                      />
+                    </div>
+                    <div className="export-stats">
+                      <span>
+                        {exportDone.length}/{exportTracks.length} done
+                      </span>
+                      {exportFailed.length > 0 && (
+                        <span className="stat-error">
+                          {exportFailed.length} failed
+                        </span>
+                      )}
+                      {exportDone.length + exportFailed.length > 0 && (
+                        <span>
+                          {Math.round(
+                            (exportDone.length /
+                              (exportDone.length + exportFailed.length)) *
+                              100,
+                          )}
+                          % success
+                        </span>
+                      )}
+                      {matchBuckets.map(
+                        ([label, count]) =>
+                          count > 0 && (
+                            <span key={label}>
+                              {count} × {label}
+                            </span>
+                          ),
+                      )}
+                    </div>
                   </div>
                 )}
               </>

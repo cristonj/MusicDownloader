@@ -223,6 +223,16 @@ export async function audioManifest(
       "youtu.be",
     ].includes(host);
     if (
+      !youtube &&
+      !signal?.aborted &&
+      error instanceof HttpError &&
+      error.status === 410
+    ) {
+      // The cached extraction holds an expired signed link; extract afresh.
+      invalidateExtraction(url);
+      return playableManifest(await extract(url, false, signal), signal);
+    }
+    if (
       !youtube ||
       signal?.aborted ||
       !(error instanceof HttpError) ||

@@ -114,7 +114,7 @@ export function allowedMedia(value: string): URL {
   return url;
 }
 const buckets = new Map<string, { time: number; count: number }>();
-export function guardRequest(request: Request, limit = 600) {
+export function guardRequest(request: Request, limit = 6000) {
   const origin = request.headers.get("origin");
   // A self-hosted server sees its bind address (0.0.0.0) in request.url, so
   // also accept the Host the browser actually addressed.
