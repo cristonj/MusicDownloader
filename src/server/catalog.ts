@@ -197,7 +197,8 @@ export async function lookupTrack(url: string, signal?: AbortSignal) {
   const found = await extract(url, true, signal);
   const track = catalogTrack(found, found.webpage_url || url);
   if (!track.matchTicket) return track;
-  const { matchTicket: _, ...rest } = track;
+  // The browser searches again with these names if the matched upload fails.
+  const { matchTicket: fallbackTicket, ...rest } = track;
   const match = await matchTrack(
     searchNames(track),
     signal,
@@ -205,7 +206,7 @@ export async function lookupTrack(url: string, signal?: AbortSignal) {
   );
   return match.error
     ? { ...rest, error: `${DRM_MESSAGE} ${match.error}` }
-    : { ...rest, ...match, error: undefined };
+    : { ...rest, ...match, fallbackTicket, error: undefined };
 }
 // Spotify supplies names, not audio, and a source can refuse its own audio
 // (DRM, removal, blocks). Pick the upload most likely to be the same recording
@@ -222,6 +223,8 @@ export async function matchTrack(
     `${track.artist} ${track.title} official audio`,
     `${track.artist} ${track.title}`,
     `${track.title} ${track.artist} audio`,
+    // Re-uploaders often post under their own name rather than the artist's.
+    track.title,
   ].map((q) => `ytsearch10:${q.trim().replace(/\s+/g, " ")}`);
   queries.push(`scsearch10:${track.artist} ${track.title}`.trim());
   let failed = false;
