@@ -288,11 +288,14 @@ export async function fetchAudio(
         throw error;
       await wait(1500, signal);
       // Skip the server's cached extraction, whose links may be dead.
+      // Report the original failure; the retry's own error says less.
       return fetchSourceAudio(
         { ...candidate, mediaUrl: `${candidate.mediaUrl}&fresh=1` },
         signal,
         onProgress,
-      );
+      ).catch((retry) => {
+        throw signal.aborted ? retry : error;
+      });
     }
   };
   let failure: unknown;
