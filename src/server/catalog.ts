@@ -215,6 +215,8 @@ export async function matchTrack(
   track: { title: string; artist: string; duration?: number },
   signal?: AbortSignal,
   origin = "Spotify",
+  // Uploads that already failed to download, so the next best is chosen.
+  exclude: string[] = [],
 ): Promise<CatalogTrack> {
   const queries = [
     `${track.artist} ${track.title} official audio`,
@@ -225,7 +227,7 @@ export async function matchTrack(
   let failed = false;
   for (const query of [...new Set(queries)]) {
     try {
-      const match = await matchQuery(track, query, origin, signal);
+      const match = await matchQuery(track, query, origin, exclude, signal);
       if (match) return match;
     } catch {
       if (signal?.aborted) break;
@@ -243,6 +245,7 @@ async function matchQuery(
   track: { title: string; artist: string; duration?: number },
   query: string,
   origin: string,
+  exclude: string[],
   signal?: AbortSignal,
 ): Promise<CatalogTrack | undefined> {
   const youtube = query.startsWith("ytsearch");
@@ -280,6 +283,7 @@ async function matchQuery(
       (x) =>
         !x.is_live &&
         link(x) &&
+        !exclude.includes(link(x)!) &&
         // SoundCloud lists DRM-only uploads with no formats.
         !(Array.isArray(x.formats) && !x.formats.length),
     )

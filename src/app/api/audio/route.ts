@@ -1,3 +1,4 @@
+import { invalidateExtraction } from "@/server/extractor";
 import { audioManifest } from "@/server/media";
 import {
   errorResponse,
@@ -19,6 +20,8 @@ export async function GET(request: Request) {
       new URL(request.url).searchParams.get("ticket") || "",
       "source",
     );
+    if (new URL(request.url).searchParams.has("fresh"))
+      invalidateExtraction(ticket.url);
     return Response.json(await audioManifest(ticket.url, deadline), {
       headers: privateHeaders,
     });

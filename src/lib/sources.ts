@@ -234,10 +234,13 @@ export async function resolveLink(
         typeof item.matchReason === "string"
           ? item.matchReason.slice(0, 300)
           : undefined,
+      // Matched tracks can search again for another upload if theirs fails.
       fallbackTicket:
         typeof item.fallbackTicket === "string"
           ? item.fallbackTicket
-          : undefined,
+          : typeof item.matchTicket === "string"
+            ? item.matchTicket
+            : undefined,
       // Only confident matches start selected; the rest wait for review.
       selected:
         !item.error && (provider !== "Spotify" || item.matchConfident === true),
@@ -262,42 +265,56 @@ export interface AudioInput {
   remuxTo?: string;
 }
 // A source can refuse audio only once the stream is opened (DRM, removal,
-// region or bot blocks). Rather than give up, download the closest upload of
-// the same recording found on YouTube.
+// region or bot blocks, dead CDN links). Retry the source with a fresh
+// extraction, then download the next-best uploads of the same recording.
 export async function fetchAudio(
   track: Track,
   signal: AbortSignal,
   onProgress: (progress: number) => void,
 ): Promise<AudioInput> {
-  try {
+  const message = (error: unknown) =>
+    error instanceof Error ? error.message : "";
+  const attempt = async (candidate: Track) => {
     try {
-      return await fetchSourceAudio(track, signal, onProgress);
+      return await fetchSourceAudio(candidate, signal, onProgress);
     } catch (error) {
-      // Signed CDN links expire and transfers drop; a fresh manifest from the
-      // same source usually works, so try that before another provider.
       if (
         signal.aborted ||
-        !/expired|interrupted|try again|unavailable/i.test(
-          error instanceof Error ? error.message : "",
+        !candidate.mediaUrl?.startsWith("/api/audio?ticket=") ||
+        !/expired|interrupted|try again|unavailable|could not/i.test(
+          message(error),
         )
       )
         throw error;
       await wait(1500, signal);
-      return await fetchSourceAudio(track, signal, onProgress);
+      // Skip the server's cached extraction, whose links may be dead.
+      return fetchSourceAudio(
+        { ...candidate, mediaUrl: `${candidate.mediaUrl}&fresh=1` },
+        signal,
+        onProgress,
+      );
     }
+  };
+  let failure: unknown;
+  try {
+    return await attempt(track);
   } catch (error) {
+    failure = error;
+  }
+  const tried = track.sourceUrl ? [track.sourceUrl] : [];
+  for (let round = 0; round < 3; round++) {
     if (
       signal.aborted ||
       !track.fallbackTicket ||
-      /memory|limit|exceeds/i.test(error instanceof Error ? error.message : "")
+      /memory|limit|exceeds/i.test(message(failure))
     )
-      throw error;
+      throw failure;
     const response = await sourceFetch(
       "/api/match",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket: track.fallbackTicket }),
+        body: JSON.stringify({ ticket: track.fallbackTicket, exclude: tried }),
         signal,
       },
       track.transport,
@@ -307,24 +324,25 @@ export async function fetchAudio(
       !response.ok ||
       typeof found?.mediaUrl !== "string" ||
       !found.mediaUrl.startsWith("/api/audio?ticket=") ||
-      found.sourceUrl === track.sourceUrl
+      typeof found.sourceUrl !== "string" ||
+      tried.includes(found.sourceUrl)
     )
       throw new Error(
-        `${(error as Error).message} ${found?.error || found?.detail || "No other upload of this track was found."}`,
+        `${message(failure)} ${found?.error || found?.detail || "No other upload of this track was found."}`,
       );
-    return fetchSourceAudio(
-      {
+    tried.push(found.sourceUrl);
+    try {
+      return await attempt({
         ...track,
         mediaUrl: found.mediaUrl,
-        sourceUrl:
-          typeof found.sourceUrl === "string" ? found.sourceUrl : undefined,
+        sourceUrl: found.sourceUrl,
         extension: "m4a",
-        fallbackTicket: undefined,
-      },
-      signal,
-      onProgress,
-    );
+      });
+    } catch (error) {
+      failure = error;
+    }
   }
+  throw failure;
 }
 async function fetchSourceAudio(
   track: Track,

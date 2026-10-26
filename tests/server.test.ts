@@ -316,6 +316,15 @@ describe("private server endpoints", () => {
     );
     expect(fan.matchConfidence).toBeLessThanOrEqual(0.75);
     expect(fan.matchConfident).toBe(false);
+    const next = await matchTrack(
+      { title: "The Tourist", artist: "Radiohead", duration: 325.6 },
+      undefined,
+      "Spotify",
+      ["https://www.youtube.com/watch?v=fanupload00"],
+    );
+    expect(next.sourceUrl).not.toBe(
+      "https://www.youtube.com/watch?v=fanupload00",
+    );
   });
   it("finds a YouTube upload when SoundCloud refuses a track for DRM", async () => {
     vi.mocked(extract).mockImplementation(async (url) =>
