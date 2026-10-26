@@ -27,6 +27,11 @@ export function useLibrary() {
   const [hydrated, setHydrated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [importProgress, setImportProgress] = useState<{
+    done: number;
+    total: number;
+    label: string;
+  } | null>(null);
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState<{
     text: string;
@@ -144,34 +149,39 @@ export function useLibrary() {
     const controller = new AbortController();
     resolveAbort.current = controller;
     setResolving(true);
+    setImportProgress(null);
     setNotice(null);
-    const timeout = setTimeout(() => controller.abort(), 180_000);
     try {
-      const result = await resolveLink(link, controller.signal);
+      const result = await resolveLink(
+        link,
+        controller.signal,
+        (done, total, label) => setImportProgress({ done, total, label }),
+      );
       if (current.current.length + result.tracks.length > MAX_TRACKS)
         throw new Error(
           `Keep your collection under ${MAX_TRACKS} tracks. Clear it to import this playlist.`,
         );
       setTracks((items) => [...items, ...result.tracks]);
       setCollection(result.title);
-      if (result.tracks.some((t) => t.provider === "Spotify"))
+      if (result.notice) notify(result.notice, "error");
+      else if (result.tracks.some((t) => t.provider === "Spotify"))
         notify(
-          "Spotify imported. Review the YouTube matches, then select the recordings you want.",
+          "Spotify imported. Confident matches are selected; review the rest before downloading.",
         );
       return true;
     } catch (error) {
       if (error instanceof HelperRequiredError) setHelperOpen(true);
       notify(
         controller.signal.aborted
-          ? "Import cancelled or timed out. Try a smaller playlist."
+          ? "Import cancelled."
           : (error as Error).message,
         "error",
       );
       return false;
     } finally {
-      clearTimeout(timeout);
       resolveAbort.current = null;
       setResolving(false);
+      setImportProgress(null);
     }
   };
   const cancel = () => {
@@ -356,6 +366,7 @@ export function useLibrary() {
     prefs,
     busy,
     resolving,
+    importProgress,
     status,
     notice,
     settingsOpen,

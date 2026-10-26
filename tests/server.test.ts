@@ -7,11 +7,12 @@ import {
   readTicket,
   signTicket,
 } from "../src/server/security";
-import { matchScore } from "../src/server/catalog";
+import { matchScore, matchTrack } from "../src/server/catalog";
 import { CHUNK_BYTES, hlsManifest, mediaChunk } from "../src/server/media";
 import { mediaFetch } from "../src/server/upstream";
 import { extract } from "../src/server/extractor";
 import { POST as resolve } from "../src/app/api/resolve/route";
+import { POST as lookup } from "../src/app/api/lookup/route";
 import { GET as audio } from "../src/app/api/audio/route";
 import { GET as media } from "../src/app/api/media/route";
 vi.mock("../src/server/upstream", () => ({
@@ -108,18 +109,14 @@ describe("private server endpoints", () => {
     expect(result.tracks[0].mediaUrl).toMatch(/^\/api\/audio\?ticket=/);
     expect(result.tracks[0].title).toBe("A song");
   });
-  it("completes SoundCloud set entries that only list a track ID", async () => {
+  it("lets the browser complete SoundCloud set entries by ID", async () => {
     vi.mocked(extract).mockImplementation(async (url) =>
       url.includes("/sets/")
         ? {
             title: "A set",
             entries: [
-              {
-                title: "First",
-                url: "https://soundcloud.com/artist/first",
-              },
+              { title: "First", url: "https://soundcloud.com/artist/first" },
               { id: "12", url: "https://api-v2.soundcloud.com/tracks/12" },
-              { id: "13", url: "https://api-v2.soundcloud.com/tracks/13" },
               { id: "14", url: "https://api-v2.soundcloud.com/tracks/14" },
             ],
           }
@@ -129,9 +126,7 @@ describe("private server endpoints", () => {
               uploader: "Artist",
               webpage_url: "https://soundcloud.com/artist/second",
             }
-          : url.endsWith("/14")
-            ? { title: "Locked", formats: [] }
-            : Promise.reject(new Error("unavailable")),
+          : { title: "Locked", formats: [] },
     );
     const response = await resolve(
       new Request("http://localhost/api/resolve", {
@@ -140,22 +135,29 @@ describe("private server endpoints", () => {
       }),
     );
     const { tracks } = await response.json();
-    expect(tracks.map((x: { title: string }) => x.title)).toEqual([
-      "First",
-      "Second",
-      "Untitled",
-      "Locked",
-    ]);
-    expect(tracks[3].error).toMatch(/DRM/);
-    expect(tracks[3].mediaUrl).toBeUndefined();
+    expect(tracks[0].lookupTicket).toBeUndefined();
+    // Stubs stay downloadable by their API link while they await a lookup.
     expect(tracks[1]).toMatchObject({
+      sourceUrl: "https://api-v2.soundcloud.com/tracks/12",
+      mediaUrl: expect.stringMatching(/^\/api\/audio\?ticket=/),
+    });
+    const look = async (ticket: string) =>
+      (
+        await lookup(
+          new Request("http://localhost/api/lookup", {
+            method: "POST",
+            body: JSON.stringify({ ticket }),
+          }),
+        )
+      ).json();
+    expect(await look(tracks[1].lookupTicket)).toMatchObject({
+      title: "Second",
       artist: "Artist",
       sourceUrl: "https://soundcloud.com/artist/second",
     });
-    expect(tracks[2].sourceUrl).toBe("https://api-v2.soundcloud.com/tracks/13");
-    expect(
-      tracks.slice(0, 3).every((x: { mediaUrl?: string }) => x.mediaUrl),
-    ).toBe(true);
+    const locked = await look(tracks[2].lookupTicket);
+    expect(locked.error).toMatch(/DRM/);
+    expect(locked.mediaUrl).toBeUndefined();
     expect(() =>
       allowedSource("https://api-v2.soundcloud.com/me/likes"),
     ).toThrow();
@@ -237,6 +239,101 @@ describe("private server endpoints", () => {
       "media",
     );
     expect(ticket.headers).toEqual({ "User-Agent": "test" });
+  });
+  it("explains which upload a Spotify track matched and why", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      entries: [
+        {
+          id: "lyricslyric",
+          title: "Radiohead - Creep (Lyrics)",
+          channel: "LyricsZone",
+          duration: 241,
+        },
+        {
+          id: "officialaud",
+          title: "Creep",
+          channel: "Radiohead - Topic",
+          duration: 238,
+        },
+        {
+          id: "liveversion",
+          title: "Radiohead - Creep (Live)",
+          channel: "Radiohead",
+          duration: 265,
+        },
+      ],
+    });
+    const match = await matchTrack({
+      title: "Creep",
+      artist: "Radiohead",
+      duration: 238.6,
+    });
+    expect(match.sourceUrl).toBe("https://www.youtube.com/watch?v=officialaud");
+    expect(match.matchReason).toMatch(
+      /official audio channel · same length \(3:58\)/,
+    );
+    expect(match.matchConfident).toBe(true);
+    vi.mocked(extract).mockResolvedValue({
+      entries: [
+        {
+          id: "radioedit00",
+          title: "Radiohead - Creep",
+          channel: "Radiohead",
+          duration: 200,
+        },
+      ],
+    });
+    const edit = await matchTrack({
+      title: "Creep",
+      artist: "Radiohead",
+      duration: 238.6,
+    });
+    expect(edit.matchConfident).not.toBe(true);
+    vi.mocked(extract).mockResolvedValue({
+      entries: [
+        {
+          id: "pitched4320",
+          title: "Radiohead The Tourist 432hz",
+          channel: "Hertz Patrol",
+          duration: 327,
+        },
+        {
+          id: "fanupload00",
+          title: "Radiohead - The Tourist",
+          channel: "Album Burial",
+          duration: 325,
+        },
+      ],
+    });
+    const fan = await matchTrack({
+      title: "The Tourist",
+      artist: "Radiohead",
+      duration: 325.6,
+    });
+    expect(fan.sourceUrl).toBe("https://www.youtube.com/watch?v=fanupload00");
+    expect(fan.matchReason).toMatch(
+      /^Fan upload by Album Burial; no official upload found/,
+    );
+    expect(fan.matchConfidence).toBeLessThanOrEqual(0.75);
+    expect(fan.matchConfident).toBe(false);
+  });
+  it("credits Bandcamp album tracks to the album artist", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      title: "Album",
+      uploader: "Band",
+      entries: [{ title: "Song", url: "https://band.bandcamp.com/track/song" }],
+    });
+    const { tracks } = await (
+      await resolve(
+        new Request("http://localhost/api/resolve", {
+          method: "POST",
+          body: JSON.stringify({
+            url: "https://band.bandcamp.com/album/album",
+          }),
+        }),
+      )
+    ).json();
+    expect(tracks[0]).toMatchObject({ title: "Song", artist: "Band" });
   });
   it("prefers matching recordings over covers and live versions", () => {
     expect(

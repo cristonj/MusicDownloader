@@ -23,7 +23,8 @@ type MatchTicket = {
   artist: string;
   duration?: number;
 };
-type Ticket = SourceTicket | MediaTicket | MatchTicket;
+type LookupTicket = { kind: "lookup"; url: string };
+type Ticket = SourceTicket | MediaTicket | MatchTicket | LookupTicket;
 let signingKey: string | undefined;
 const key = () =>
   (signingKey ??= readFileSync(join(process.cwd(), ".server/key"), "utf8"));
@@ -52,7 +53,7 @@ export function readTicket<T extends Ticket["kind"]>(
     if (value.kind !== kind || typeof value.exp !== "number") throw new Error();
     if (value.exp < Date.now())
       throw new HttpError(410, "This link expired. Import it again.");
-    if (kind === "source") allowedSource(value.url);
+    if (kind === "source" || kind === "lookup") allowedSource(value.url);
     else if (kind === "media") allowedMedia(value.url);
     return value;
   } catch (error) {

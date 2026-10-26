@@ -32,7 +32,8 @@ export function localTrack(file: File): Track {
 export async function resolveLink(
   input: string,
   signal: AbortSignal,
-): Promise<{ title: string; tracks: Track[] }> {
+  onProgress?: (done: number, total: number, label: string) => void,
+): Promise<{ title: string; tracks: Track[]; notice?: string }> {
   const url = parseUrl(input);
   const provider = providerFor(url);
   if (provider === "Direct link") {
@@ -90,40 +91,57 @@ export async function resolveLink(
     throw new Error("This link has no downloadable tracks.");
   if (result.tracks.length > MAX_TRACKS)
     throw new Error(`Import up to ${MAX_TRACKS} tracks at a time.`);
-  // Each Spotify match has its own short server invocation. Large playlists do
-  // not need one long-running function or background service.
-  let next = 0;
+  // Each lookup or Spotify match is its own short server invocation, so long
+  // playlists need no long-running function and can report progress.
+  const jobs = result.tracks.flatMap(
+    (item: Record<string, unknown>, index: number) =>
+      typeof item.lookupTicket === "string"
+        ? [{ index, path: "/api/lookup", ticket: item.lookupTicket }]
+        : typeof item.matchTicket === "string"
+          ? [{ index, path: "/api/match", ticket: item.matchTicket }]
+          : [],
+  );
+  const label =
+    provider === "Spotify"
+      ? "Matching tracks on YouTube"
+      : "Loading track details";
+  let next = 0,
+    done = 0;
+  if (jobs.length) onProgress?.(0, jobs.length, label);
   await Promise.all(
-    Array.from({ length: Math.min(4, result.tracks.length) }, async () => {
-      while (next < result.tracks.length) {
-        const index = next++,
-          item = result.tracks[index];
-        if (typeof item.matchTicket !== "string") continue;
+    Array.from({ length: Math.min(8, jobs.length) }, async () => {
+      while (next < jobs.length) {
+        const job = jobs[next++],
+          item = result.tracks[job.index];
         try {
           const response = await sourceFetch(
-            "/api/match",
+            job.path,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ticket: item.matchTicket }),
+              body: JSON.stringify({ ticket: job.ticket }),
               signal,
             },
             transport,
           );
-          const matched = await response.json();
-          result.tracks[index] = {
-            ...item,
-            ...(response.ok
-              ? matched
-              : { error: matched.detail || "No audio match found." }),
-          };
+          const found = await response.json();
+          if (response.ok) result.tracks[job.index] = { ...item, ...found };
+          // A failed lookup keeps its playable link; a failed match has none.
+          else if (job.path === "/api/match")
+            result.tracks[job.index] = {
+              ...item,
+              error: found.detail || "No audio match found.",
+            };
         } catch (error) {
           if (signal.aborted) throw error;
-          result.tracks[index] = {
-            ...item,
-            error: "Matching is temporarily unavailable. Re-import this track.",
-          };
+          if (job.path === "/api/match")
+            result.tracks[job.index] = {
+              ...item,
+              error:
+                "Matching is temporarily unavailable. Re-import this track.",
+            };
         }
+        onProgress?.(++done, jobs.length, label);
       }
     }),
   );
@@ -167,7 +185,17 @@ export async function resolveLink(
         typeof item.matchConfidence === "number"
           ? item.matchConfidence
           : undefined,
-      selected: provider !== "Spotify" && !item.error,
+      matchedChannel:
+        typeof item.matchedChannel === "string"
+          ? item.matchedChannel.slice(0, 200)
+          : undefined,
+      matchReason:
+        typeof item.matchReason === "string"
+          ? item.matchReason.slice(0, 300)
+          : undefined,
+      // Only confident matches start selected; the rest wait for review.
+      selected:
+        !item.error && (provider !== "Spotify" || item.matchConfident === true),
       status: item.error ? "error" : "ready",
       error: typeof item.error === "string" ? item.error : undefined,
       progress: 0,
@@ -177,6 +205,10 @@ export async function resolveLink(
     title:
       typeof result.title === "string" ? result.title.slice(0, 300) : provider,
     tracks,
+    notice:
+      typeof result.notice === "string"
+        ? result.notice.slice(0, 300)
+        : undefined,
   };
 }
 export interface AudioInput {

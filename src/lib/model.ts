@@ -21,6 +21,8 @@ export interface Track {
   sourceUrl?: string;
   matchedTitle?: string;
   matchConfidence?: number;
+  matchedChannel?: string;
+  matchReason?: string;
   extension: string;
   selected: boolean;
   status: TrackStatus;
@@ -53,7 +55,9 @@ export const formats: { value: Format; label: string; note: string }[] = [
 ];
 export const MAX_FILE_BYTES = 150 * 1024 * 1024;
 export const MAX_BATCH_BYTES = 450 * 1024 * 1024;
-export const MAX_TRACKS = 100;
+// A safety ceiling on request sizes, not a product limit. Downloads are still
+// bounded by MAX_BATCH_BYTES of browser memory.
+export const MAX_TRACKS = 5000;
 // CDN hosts the services stream audio from. SoundCloud moved its HLS audio to
 // media-streaming.soundcloud.cloud; sndcdn.com still serves older tracks.
 export const MEDIA_HOSTS = [

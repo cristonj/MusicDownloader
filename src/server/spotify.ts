@@ -73,15 +73,20 @@ export async function spotifyMetadata(value: string) {
   )) as SpotifyData;
   const entries = data.trackList || [data];
   const count = data.trackCount || data.totalCount || entries.length;
-  if (count > MAX_TRACKS || entries.length > MAX_TRACKS)
-    throw new HttpError(422, "Import a playlist with up to 100 tracks.");
-  if (count > entries.length)
-    throw new HttpError(
-      422,
-      "Spotify returned only part of this playlist. Try a smaller public playlist.",
-    );
+  if (entries.length > MAX_TRACKS)
+    throw new HttpError(422, `Import up to ${MAX_TRACKS} tracks at a time.`);
+  // Spotify's public (signed-out) view lists at most 100 playlist tracks.
+  const partial =
+    count > entries.length ||
+    (data.type === "playlist" && entries.length >= 100);
   return {
     title: data.name || "Spotify",
+    ...(partial
+      ? {
+          notice:
+            "Spotify only shows the first 100 tracks of a playlist publicly, so longer playlists import their first 100. Split it into smaller playlists to get the rest.",
+        }
+      : {}),
     tracks: entries.map((track) => ({
       title: (track.title || track.name || "Untitled").slice(0, 300),
       artist: (
