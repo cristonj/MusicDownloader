@@ -6,9 +6,20 @@ export type Provider =
   | "Direct link"
   | "Local file";
 export type Format =
-  "original" | "mp3" | "m4a" | "flac" | "wav" | "ogg" | "opus" | "aiff";
+  | "original"
+  | "mp3"
+  | "m4a"
+  | "flac"
+  | "wav"
+  | "ogg"
+  | "opus"
+  | "aiff";
 export type TrackStatus =
-  "ready" | "fetching" | "converting" | "done" | "error";
+  | "ready"
+  | "fetching"
+  | "converting"
+  | "done"
+  | "error";
 export interface Track {
   id: string;
   title: string;
@@ -23,6 +34,8 @@ export interface Track {
   matchConfidence?: number;
   matchedChannel?: string;
   matchReason?: string;
+  // Signed names to search other providers with if the source refuses (DRM).
+  fallbackTicket?: string;
   extension: string;
   selected: boolean;
   status: TrackStatus;

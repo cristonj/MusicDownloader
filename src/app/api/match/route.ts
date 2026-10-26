@@ -15,10 +15,10 @@ export async function POST(request: Request) {
     const data = await readBody(request);
     if (typeof data.ticket !== "string")
       throw new HttpError(400, "A track is required.");
-    return Response.json(
-      await matchTrack(readTicket(data.ticket, "match"), request.signal),
-      { headers: privateHeaders },
-    );
+    const { origin, ...track } = readTicket(data.ticket, "match");
+    return Response.json(await matchTrack(track, request.signal, origin), {
+      headers: privateHeaders,
+    });
   } catch (error) {
     return errorResponse(error);
   }

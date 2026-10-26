@@ -206,117 +206,127 @@ export function useLibrary() {
       0,
     );
     try {
-      // Three concurrent network transfers; one WASM conversion at a time.
-      for (let start = 0; start < selected.length; start += 3) {
-        const group = selected.slice(start, start + 3);
-        const inputs = await Promise.all(
-          group.map(async (track) => {
-            if (signal.aborted) return null;
-            if (track.output)
-              return {
-                blob: track.output,
-                extension: track.extension,
-                remuxTo: undefined as string | undefined,
-              };
+      // Six transfers stream continuously while one WASM conversion runs at a
+      // time, so a slow track or conversion never stalls the other downloads.
+      const fetchOne = async (track: Track) => {
+        if (signal.aborted) return null;
+        if (track.output)
+          return {
+            blob: track.output,
+            extension: track.extension,
+            remuxTo: undefined as string | undefined,
+          };
+        patch(track.id, {
+          status: "fetching",
+          error: undefined,
+          progress: 0,
+        });
+        setStatus(`Fetching ${track.title}…`);
+        try {
+          const data = await fetchAudio(track, signal, (value) =>
             patch(track.id, {
-              status: "fetching",
-              error: undefined,
-              progress: 0,
-            });
-            setStatus(`Fetching ${track.title}…`);
-            try {
-              const data = await fetchAudio(track, signal, (value) =>
-                patch(track.id, {
-                  progress: value * (prefs.format === "original" ? 0.99 : 0.35),
-                }),
+              progress: value * (prefs.format === "original" ? 0.99 : 0.35),
+            }),
+          );
+          if (!track.file) {
+            memory += data.blob.size;
+            if (memory > MAX_BATCH_BYTES) {
+              memory -= data.blob.size;
+              throw new Error(
+                "Browser memory limit reached. Export a smaller selection.",
               );
-              if (!track.file) {
-                memory += data.blob.size;
-                if (memory > MAX_BATCH_BYTES) {
-                  memory -= data.blob.size;
-                  throw new Error(
-                    "Browser memory limit reached. Export a smaller selection.",
-                  );
-                }
-              }
-              patch(track.id, { extension: data.extension });
-              return data;
-            } catch (error) {
-              if (error instanceof HelperRequiredError) setHelperOpen(true);
-              if (!signal.aborted) {
-                patch(track.id, {
-                  status: "error",
-                  error: (error as Error).message,
-                });
-                failures++;
-              }
-              return null;
             }
-          }),
-        );
-        for (let i = 0; i < group.length; i++) {
-          if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
-          const fetched = inputs[i];
-          if (!fetched) continue;
-          const track = { ...group[i], extension: fetched.extension },
-            input = fetched.blob;
-          try {
-            let output = track.output;
-            if (!output) {
-              if (prefs.format !== "original" || fetched.remuxTo)
-                patch(track.id, { status: "converting", progress: 0.35 });
-              output = await convertAudio(
-                input,
-                track,
-                prefs,
-                signal,
-                (value) => patch(track.id, { progress: 0.35 + value * 0.65 }),
-                setStatus,
-                fetched.remuxTo,
-              );
-              if (signal.aborted)
-                throw new DOMException("Cancelled", "AbortError");
-              if (output !== input)
-                memory += output.size - (track.file ? 0 : input.size);
-              if (memory > MAX_BATCH_BYTES)
-                throw new Error(
-                  "Converted audio exceeds the browser memory limit. Try a smaller selection.",
-                );
-            }
-            const name =
-              track.outputName ||
-              outputFilename(
-                {
-                  ...track,
-                  extension:
-                    prefs.format === "original"
-                      ? fetched.remuxTo || track.extension
-                      : track.extension,
-                },
-                prefs.format,
-              );
-            patch(track.id, {
-              status: "done",
-              extension:
-                prefs.format === "original"
-                  ? fetched.remuxTo || track.extension
-                  : track.extension,
-              output,
-              outputName: name,
-              progress: 1,
-            });
-            results.push({ name, blob: output });
-          } catch (error) {
-            if (signal.aborted) throw error;
+          }
+          patch(track.id, { extension: data.extension });
+          return data;
+        } catch (error) {
+          if (error instanceof HelperRequiredError) setHelperOpen(true);
+          if (!signal.aborted) {
             patch(track.id, {
               status: "error",
               error: (error as Error).message,
             });
             failures++;
           }
-          inputs[i] = null;
+          return null;
         }
-      }
+      };
+      const convertOne = async (
+        source: Track,
+        fetched: NonNullable<Awaited<ReturnType<typeof fetchOne>>>,
+      ) => {
+        if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+        const track = { ...source, extension: fetched.extension },
+          input = fetched.blob;
+        try {
+          let output = track.output;
+          if (!output) {
+            if (prefs.format !== "original" || fetched.remuxTo)
+              patch(track.id, { status: "converting", progress: 0.35 });
+            output = await convertAudio(
+              input,
+              track,
+              prefs,
+              signal,
+              (value) => patch(track.id, { progress: 0.35 + value * 0.65 }),
+              setStatus,
+              fetched.remuxTo,
+            );
+            if (signal.aborted)
+              throw new DOMException("Cancelled", "AbortError");
+            if (output !== input)
+              memory += output.size - (track.file ? 0 : input.size);
+            if (memory > MAX_BATCH_BYTES)
+              throw new Error(
+                "Converted audio exceeds the browser memory limit. Try a smaller selection.",
+              );
+          }
+          const name =
+            track.outputName ||
+            outputFilename(
+              {
+                ...track,
+                extension:
+                  prefs.format === "original"
+                    ? fetched.remuxTo || track.extension
+                    : track.extension,
+              },
+              prefs.format,
+            );
+          patch(track.id, {
+            status: "done",
+            extension:
+              prefs.format === "original"
+                ? fetched.remuxTo || track.extension
+                : track.extension,
+            output,
+            outputName: name,
+            progress: 1,
+          });
+          results.push({ name, blob: output });
+        } catch (error) {
+          if (signal.aborted) throw error;
+          patch(track.id, {
+            status: "error",
+            error: (error as Error).message,
+          });
+          failures++;
+        }
+      };
+      let next = 0,
+        conversions: Promise<unknown> = Promise.resolve();
+      await Promise.all(
+        Array.from({ length: Math.min(6, selected.length) }, async () => {
+          while (next < selected.length && !signal.aborted) {
+            const track = selected[next++];
+            const fetched = await fetchOne(track);
+            if (!fetched) continue;
+            const turn = conversions.then(() => convertOne(track, fetched));
+            conversions = turn.catch(() => {});
+            await turn;
+          }
+        }),
+      );
       if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
       if (!results.length) {
         notify(

@@ -317,6 +317,96 @@ describe("private server endpoints", () => {
     expect(fan.matchConfidence).toBeLessThanOrEqual(0.75);
     expect(fan.matchConfident).toBe(false);
   });
+  it("finds a YouTube upload when SoundCloud refuses a track for DRM", async () => {
+    vi.mocked(extract).mockImplementation(async (url) =>
+      url.startsWith("ytsearch10:")
+        ? {
+            entries: [
+              {
+                id: "officialaud",
+                title: "Locked Song",
+                channel: "Some Artist - Topic",
+                duration: 200,
+              },
+            ],
+          }
+        : {
+            title: "Some Artist - Locked Song",
+            duration: 200,
+            formats: [],
+            webpage_url: "https://soundcloud.com/label/locked",
+          },
+    );
+    const found = await (
+      await lookup(
+        new Request("http://localhost/api/lookup", {
+          method: "POST",
+          body: JSON.stringify({
+            ticket: signTicket({
+              kind: "lookup",
+              url: "https://api-v2.soundcloud.com/tracks/14",
+            }),
+          }),
+        }),
+      )
+    ).json();
+    expect(found.error).toBeUndefined();
+    expect(found.sourceUrl).toBe("https://www.youtube.com/watch?v=officialaud");
+    expect(found.matchReason).toMatch(/official audio channel/);
+  });
+  it("finds another upload when a source refuses a track", async () => {
+    vi.mocked(extract).mockImplementation(async (url) =>
+      url.startsWith("ytsearch10:")
+        ? { entries: [] }
+        : url.startsWith("scsearch10:")
+          ? {
+              entries: [
+                {
+                  id: "1",
+                  title: "Locked Song",
+                  uploader: "Some Artist",
+                  duration: 200,
+                  formats: [],
+                  url: "https://soundcloud.com/some-artist/drm",
+                },
+                {
+                  id: "2",
+                  title: "Locked Song",
+                  uploader: "Some Artist",
+                  duration: 200,
+                  url: "https://soundcloud.com/some-artist/locked-song",
+                },
+              ],
+            }
+          : {
+              title: "Some Artist - Locked Song",
+              duration: 200,
+              formats: [],
+              webpage_url: "https://soundcloud.com/label/locked",
+            },
+    );
+    const found = await (
+      await lookup(
+        new Request("http://localhost/api/lookup", {
+          method: "POST",
+          body: JSON.stringify({
+            ticket: signTicket({
+              kind: "lookup",
+              url: "https://api-v2.soundcloud.com/tracks/14",
+            }),
+          }),
+        }),
+      )
+    ).json();
+    expect(found.error).toBeUndefined();
+    expect(found.sourceUrl).toBe(
+      "https://soundcloud.com/some-artist/locked-song",
+    );
+    expect(found.matchReason).toMatch(/^On SoundCloud/);
+    expect(vi.mocked(extract).mock.calls[1][0]).toBe(
+      "ytsearch10:Some Artist Locked Song official audio",
+    );
+  });
   it("credits Bandcamp album tracks to the album artist", async () => {
     vi.mocked(extract).mockResolvedValue({
       title: "Album",

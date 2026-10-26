@@ -17,6 +17,7 @@ export interface CatalogTrack {
   error?: string;
   matchTicket?: string;
   lookupTicket?: string;
+  fallbackTicket?: string;
 }
 const words = (s: string) =>
   new Set(s.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
@@ -82,6 +83,18 @@ function downloadTrack(track: CatalogTrack, url: string): CatalogTrack {
 const needsLookup = (entry: Extracted) =>
   !entry.title &&
   /^https:\/\/(?:[a-z0-9-]+\.)?soundcloud\.com\//.test(entry.url || "");
+export const DRM_MESSAGE =
+  "SoundCloud doesn’t allow this track to be downloaded (DRM).";
+// The names to search other providers with when the source refuses the audio.
+// SoundCloud uploads often title tracks "Artist - Title".
+function searchNames(track: CatalogTrack) {
+  const credited = track.title.match(/^(.+?) [-–—] (.+)$/);
+  return {
+    title: credited ? credited[2] : track.title,
+    artist: credited ? credited[1] : track.artist,
+    duration: track.duration,
+  };
+}
 function catalogTrack(
   entry: Extracted,
   source: string,
@@ -96,18 +109,34 @@ function catalogTrack(
   };
   if (entry.is_live)
     return { ...track, error: "Live streams cannot be downloaded." };
+  const provider = providerFor(new URL(source));
+  const soundcloud = provider === "SoundCloud";
   // SoundCloud lists DRM-only tracks with no formats rather than failing.
-  if (
-    providerFor(new URL(source)) === "SoundCloud" &&
-    Array.isArray(entry.formats) &&
-    !entry.formats.length
-  )
+  // Those are matched on YouTube instead.
+  if (soundcloud && Array.isArray(entry.formats) && !entry.formats.length)
     return {
       ...track,
-      error: "SoundCloud doesn’t allow this track to be downloaded (DRM).",
+      error: DRM_MESSAGE,
+      matchTicket: signTicket({
+        kind: "match",
+        ...searchNames(track),
+        origin: provider,
+      }),
     };
   try {
-    return downloadTrack(track, source);
+    const found = downloadTrack(track, source);
+    // DRM, removals and blocks can surface only once the stream is opened;
+    // the browser then searches the other providers with these names.
+    return entry.title
+      ? {
+          ...found,
+          fallbackTicket: signTicket({
+            kind: "match",
+            ...searchNames(track),
+            origin: provider,
+          }),
+        }
+      : found;
   } catch {
     return { ...track, error: "This entry has no downloadable audio source." };
   }
@@ -166,97 +195,138 @@ export async function resolveCatalog(value: string, signal?: AbortSignal) {
 }
 export async function lookupTrack(url: string, signal?: AbortSignal) {
   const found = await extract(url, true, signal);
-  return catalogTrack(found, found.webpage_url || url);
+  const track = catalogTrack(found, found.webpage_url || url);
+  if (!track.matchTicket) return track;
+  const { matchTicket: _, ...rest } = track;
+  const match = await matchTrack(
+    searchNames(track),
+    signal,
+    providerFor(new URL(found.webpage_url || url)),
+  );
+  return match.error
+    ? { ...rest, error: `${DRM_MESSAGE} ${match.error}` }
+    : { ...rest, ...match, error: undefined };
 }
-// Spotify supplies names, not audio. Pick the YouTube upload most likely to be
-// the same recording and say why, so the listener can verify it.
+// Spotify supplies names, not audio, and a source can refuse its own audio
+// (DRM, removal, blocks). Pick the upload most likely to be the same recording
+// and say why, so the listener can verify it. Broader YouTube searches, then
+// SoundCloud, run only when the narrower ones find nothing close.
 export async function matchTrack(
   track: { title: string; artist: string; duration?: number },
   signal?: AbortSignal,
+  origin = "Spotify",
 ): Promise<CatalogTrack> {
-  try {
-    const found = await extract(
-      `ytsearch10:${track.artist} ${track.title} official audio`,
-      true,
-      signal,
-    );
-    const artists = words(track.artist);
-    const official = (x: Extracted) => {
-      const channel = (x.channel || x.uploader || "").toLocaleLowerCase();
-      if (/ - topic$/.test(channel))
-        return "the artist’s official audio channel";
-      if (/vevo$/.test(channel)) return "the artist’s VEVO channel";
-      if (
-        artists.size &&
-        [...words(channel)].filter((w) => artists.has(w)).length >=
-          Math.min(2, artists.size)
-      )
-        return "the artist’s channel";
-      return "";
-    };
-    const lengthMatches = (x: Extracted) =>
-      Boolean(
-        track.duration &&
-        x.duration &&
-        Math.abs(track.duration - x.duration) <=
-          Math.max(3, track.duration * 0.03),
-      );
-    const scored = (found.entries || [])
-      .filter((x) => !x.is_live && /^[a-zA-Z0-9_-]{11}$/.test(x.id || ""))
-      .map((x) => {
-        let score = matchScore(track.title, track.artist, track.duration, x);
-        if (official(x)) score += 0.1;
-        if (lengthMatches(x)) score += 0.1;
-        else if (track.duration && x.duration) score -= 0.25;
-        // Fan lyric videos and visualizers may re-edit or overlay the audio.
-        if (
-          /\b(?:lyrics?|visuali[sz]er)\b/i.test(x.title || "") &&
-          !/\blyrics?\b/i.test(track.title)
-        )
-          score -= 0.1;
-        // Rank unclamped so official uploads win ties at the top.
-        return { x, score };
-      })
-      .sort((a, b) => b.score - a.score);
-    const best = scored[0];
-    if (!best || best.score < 0.58)
-      return {
-        ...track,
-        error: "No close audio match found. Add a source link for this track.",
-      };
-    const channel = best.x.channel || best.x.uploader || "";
-    const source = official(best.x);
-    // A fan upload can be the right song but cannot be verified as the exact
-    // release, so it is never reported as a certain match.
-    const confidence = Math.min(source ? 1 : 0.75, best.score);
-    const reasons = [
-      source
-        ? `From ${source}`
-        : `Fan upload by ${channel || "an unknown channel"}; no official upload found`,
-      lengthMatches(best.x)
-        ? `same length (${durationLabel(best.x.duration)})`
-        : best.x.duration && track.duration
-          ? `length differs: ${durationLabel(best.x.duration)} vs ${durationLabel(track.duration)} on Spotify`
-          : "length not compared",
-    ];
-    return downloadTrack(
-      {
-        ...track,
-        extension: "m4a",
-        matchedTitle: best.x.title,
-        matchedChannel: channel,
-        matchConfidence: confidence,
-        matchReason: reasons.join(" · "),
-        matchConfident:
-          Boolean(source) && confidence >= 0.8 && lengthMatches(best.x),
-      },
-      `https://www.youtube.com/watch?v=${best.x.id}`,
-    );
-  } catch {
-    return {
-      ...track,
-      error:
-        "Matching is temporarily unavailable. Re-import this track to try again.",
-    };
+  const queries = [
+    `${track.artist} ${track.title} official audio`,
+    `${track.artist} ${track.title}`,
+    `${track.title} ${track.artist} audio`,
+  ].map((q) => `ytsearch10:${q.trim().replace(/\s+/g, " ")}`);
+  queries.push(`scsearch10:${track.artist} ${track.title}`.trim());
+  let failed = false;
+  for (const query of [...new Set(queries)]) {
+    try {
+      const match = await matchQuery(track, query, origin, signal);
+      if (match) return match;
+    } catch {
+      if (signal?.aborted) break;
+      failed = true;
+    }
   }
+  return {
+    ...track,
+    error: failed
+      ? "Matching is temporarily unavailable. Re-import this track to try again."
+      : "No close audio match found. Add a source link for this track.",
+  };
+}
+async function matchQuery(
+  track: { title: string; artist: string; duration?: number },
+  query: string,
+  origin: string,
+  signal?: AbortSignal,
+): Promise<CatalogTrack | undefined> {
+  const youtube = query.startsWith("ytsearch");
+  const found = await extract(query, true, signal);
+  const link = (x: Extracted) =>
+    youtube
+      ? /^[a-zA-Z0-9_-]{11}$/.test(x.id || "")
+        ? `https://www.youtube.com/watch?v=${x.id}`
+        : undefined
+      : (x.webpage_url || x.url || "").match(
+          /^https:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/?#]+\/[^/?#]+$/,
+        )?.[0];
+  const artists = words(track.artist);
+  const official = (x: Extracted) => {
+    const channel = (x.channel || x.uploader || "").toLocaleLowerCase();
+    if (/ - topic$/.test(channel)) return "the artist’s official audio channel";
+    if (/vevo$/.test(channel)) return "the artist’s VEVO channel";
+    if (
+      artists.size &&
+      [...words(channel)].filter((w) => artists.has(w)).length >=
+        Math.min(2, artists.size)
+    )
+      return "the artist’s channel";
+    return "";
+  };
+  const lengthMatches = (x: Extracted) =>
+    Boolean(
+      track.duration &&
+      x.duration &&
+      Math.abs(track.duration - x.duration) <=
+        Math.max(3, track.duration * 0.03),
+    );
+  const scored = (found.entries || [])
+    .filter(
+      (x) =>
+        !x.is_live &&
+        link(x) &&
+        // SoundCloud lists DRM-only uploads with no formats.
+        !(Array.isArray(x.formats) && !x.formats.length),
+    )
+    .map((x) => {
+      let score = matchScore(track.title, track.artist, track.duration, x);
+      if (official(x)) score += 0.1;
+      if (lengthMatches(x)) score += 0.1;
+      else if (track.duration && x.duration) score -= 0.25;
+      // Fan lyric videos and visualizers may re-edit or overlay the audio.
+      if (
+        /\b(?:lyrics?|visuali[sz]er)\b/i.test(x.title || "") &&
+        !/\blyrics?\b/i.test(track.title)
+      )
+        score -= 0.1;
+      // Rank unclamped so official uploads win ties at the top.
+      return { x, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score < 0.58) return undefined;
+  const channel = best.x.channel || best.x.uploader || "";
+  const source = official(best.x);
+  // A fan upload can be the right song but cannot be verified as the exact
+  // release, so it is never reported as a certain match.
+  const confidence = Math.min(source ? 1 : 0.75, best.score);
+  const reasons = [
+    ...(youtube ? [] : ["On SoundCloud"]),
+    source
+      ? `From ${source}`
+      : `Fan upload by ${channel || "an unknown channel"}; no official upload found`,
+    lengthMatches(best.x)
+      ? `same length (${durationLabel(best.x.duration)})`
+      : best.x.duration && track.duration
+        ? `length differs: ${durationLabel(best.x.duration)} vs ${durationLabel(track.duration)} on ${origin}`
+        : "length not compared",
+  ];
+  return downloadTrack(
+    {
+      ...track,
+      extension: "m4a",
+      matchedTitle: best.x.title,
+      matchedChannel: channel,
+      matchConfidence: confidence,
+      matchReason: reasons.join(" · "),
+      matchConfident:
+        Boolean(source) && confidence >= 0.8 && lengthMatches(best.x),
+    },
+    link(best.x)!,
+  );
 }
