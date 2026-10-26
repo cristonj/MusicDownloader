@@ -1,36 +1,63 @@
 import type { FFmpeg } from "@ffmpeg/ffmpeg";
 import { conversionArgs, type Preferences, type Track } from "./model";
-let engine: FFmpeg | null = null;
-let loading: Promise<FFmpeg> | null = null;
+// Each engine is its own worker, so several tracks convert in parallel on
+// multi-core devices. Engines are reused across tracks once loaded.
+export const CONVERSION_SLOTS =
+  typeof navigator === "undefined"
+    ? 1
+    : Math.max(
+        1,
+        Math.min(3, Math.floor((navigator.hardwareConcurrency || 2) / 2)),
+      );
+const idle: FFmpeg[] = [];
+const busy = new Set<FFmpeg>();
 
 export function cancelConversion() {
-  engine?.terminate();
-  engine = null;
-  loading = null;
+  for (const engine of [...idle, ...busy]) engine.terminate();
+  idle.length = 0;
+  busy.clear();
 }
 async function getEngine(
   signal: AbortSignal,
   onStatus: (message: string) => void,
 ): Promise<FFmpeg> {
-  if (engine?.loaded) return engine;
-  if (!loading) {
-    loading = (async () => {
-      onStatus("Loading the on-device audio engine…");
-      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-      if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
-      const next = new FFmpeg();
-      engine = next;
-      await next.load({
-        coreURL: `${location.origin}/ffmpeg/ffmpeg-core.js`,
-        wasmURL: `${location.origin}/ffmpeg/ffmpeg-core.wasm`,
-      });
-      return next;
-    })().catch((error) => {
-      loading = null;
-      throw error;
-    });
+  const ready = idle.pop();
+  if (ready?.loaded) {
+    busy.add(ready);
+    return ready;
   }
-  return loading;
+  onStatus("Loading the on-device audio engine…");
+  const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+  if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+  const next = new FFmpeg();
+  busy.add(next);
+  try {
+    await next.load({
+      coreURL: `${location.origin}/ffmpeg/ffmpeg-core.js`,
+      wasmURL: `${location.origin}/ffmpeg/ffmpeg-core.wasm`,
+    });
+  } catch (error) {
+    busy.delete(next);
+    next.terminate();
+    throw error;
+  }
+  return next;
+}
+function releaseEngine(engine: FFmpeg, broken: boolean) {
+  if (!busy.delete(engine)) return;
+  if (broken) engine.terminate();
+  else idle.push(engine);
+}
+// Re-encoding is the slow part; when the source already uses the requested
+// codec at its own sample rate, copying the audio is near-instant.
+function copiesAs(extension: string, prefs: Preferences) {
+  if (prefs.sampleRate !== "source") return false;
+  const sources: Partial<Record<Preferences["format"], string[]>> = {
+    m4a: ["m4a", "mp4", "aac"],
+    opus: ["webm", "opus"],
+    mp3: ["mp3"],
+  };
+  return sources[prefs.format]?.includes(extension.toLowerCase()) ?? false;
 }
 export async function convertAudio(
   input: Blob,
@@ -50,6 +77,7 @@ export async function convertAudio(
   const listener = ({ progress }: { progress: number }) =>
     onProgress(Math.max(0, Math.min(0.99, progress)));
   ffmpeg.on("progress", listener);
+  let broken = false;
   try {
     onStatus(`Converting ${track.title} on your device…`);
     await ffmpeg.writeFile(
@@ -59,7 +87,7 @@ export async function convertAudio(
     const code = await ffmpeg.exec([
       "-i",
       inputName,
-      ...(prefs.format === "original"
+      ...(prefs.format === "original" || copiesAs(track.extension, prefs)
         ? ["-map", "0:a:0", "-vn", "-c:a", "copy"]
         : conversionArgs(prefs)),
       "-map_metadata",
@@ -92,7 +120,7 @@ export async function convertAudio(
     };
     return new Blob([new Uint8Array(result)], { type: types[outputFormat] });
   } catch (error) {
-    cancelConversion();
+    broken = true;
     if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
     throw error instanceof Error
       ? error
@@ -101,6 +129,7 @@ export async function convertAudio(
     ffmpeg.off("progress", listener);
     await ffmpeg.deleteFile(inputName).catch(() => {});
     await ffmpeg.deleteFile(outputName).catch(() => {});
+    releaseEngine(ffmpeg, broken);
   }
 }
 export function saveBlob(blob: Blob, filename: string) {

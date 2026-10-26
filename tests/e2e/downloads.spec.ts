@@ -136,9 +136,10 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
     .fill("https://open.spotify.com/playlist/1234567890123456789012");
   await page.getByRole("button", { name: "Add music link" }).click();
   await expect(page.getByText("A favorite", { exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: /YouTube match/ }),
-  ).toHaveAttribute("href", "https://www.youtube.com/watch?v=abcdefghijk");
+  await expect(page.getByRole("link", { name: /Match:/ })).toHaveAttribute(
+    "href",
+    "https://www.youtube.com/watch?v=abcdefghijk",
+  );
   await expect(
     page.getByLabel("Select A favorite", { exact: true }),
   ).not.toBeChecked();
@@ -443,7 +444,7 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     expect(request.headers().authorization).toBe(`Bearer ${token}`);
     if (path === "/health")
       await route.fulfill({
-        json: { app: "MusicDownloader", version: 2, ready: true },
+        json: { app: "MusicDownloader", version: 3, ready: true },
         headers,
       });
     else if (path === "/api/resolve") {

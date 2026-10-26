@@ -19,7 +19,13 @@ import {
   helperOutdated,
   HelperRequiredError,
 } from "@/lib/helper";
-import { cancelConversion, convertAudio, makeZip, saveBlob } from "@/lib/audio";
+import {
+  cancelConversion,
+  CONVERSION_SLOTS,
+  convertAudio,
+  makeZip,
+  saveBlob,
+} from "@/lib/audio";
 
 export function useLibrary() {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -209,8 +215,8 @@ export function useLibrary() {
       0,
     );
     try {
-      // Six transfers stream continuously while one WASM conversion runs at a
-      // time, so a slow track or conversion never stalls the other downloads.
+      // Six transfers stream continuously while a few WASM conversions run in
+      // parallel, so a slow track or conversion never stalls the others.
       const fetchOne = async (track: Track) => {
         if (signal.aborted) return null;
         if (track.output)
@@ -317,16 +323,23 @@ export function useLibrary() {
         }
       };
       let next = 0,
-        conversions: Promise<unknown> = Promise.resolve();
+        converting = 0;
+      const waiting: (() => void)[] = [];
       await Promise.all(
         Array.from({ length: Math.min(6, selected.length) }, async () => {
           while (next < selected.length && !signal.aborted) {
             const track = selected[next++];
             const fetched = await fetchOne(track);
             if (!fetched) continue;
-            const turn = conversions.then(() => convertOne(track, fetched));
-            conversions = turn.catch(() => {});
-            await turn;
+            while (converting >= CONVERSION_SLOTS)
+              await new Promise<void>((resolve) => waiting.push(resolve));
+            converting++;
+            try {
+              await convertOne(track, fetched);
+            } finally {
+              converting--;
+              waiting.shift()?.();
+            }
           }
         }),
       );

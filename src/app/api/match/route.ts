@@ -16,9 +16,16 @@ export async function POST(request: Request) {
     if (typeof data.ticket !== "string")
       throw new HttpError(400, "A track is required.");
     const { origin, ...track } = readTicket(data.ticket, "match");
-    return Response.json(await matchTrack(track, request.signal, origin), {
-      headers: privateHeaders,
-    });
+    // Uploads the browser already failed to download.
+    const exclude = Array.isArray(data.exclude)
+      ? data.exclude
+          .filter((url): url is string => typeof url === "string")
+          .slice(0, 10)
+      : [];
+    return Response.json(
+      await matchTrack(track, request.signal, origin, exclude),
+      { headers: privateHeaders },
+    );
   } catch (error) {
     return errorResponse(error);
   }
