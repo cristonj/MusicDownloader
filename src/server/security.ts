@@ -75,7 +75,10 @@ export function allowedSource(value: string): URL {
     (provider === "Bandcamp" &&
       /^(?:[a-z0-9-]+\.)?bandcamp\.com$/.test(url.hostname)) ||
     (provider === "SoundCloud" &&
-      /^(?:www\.|m\.|on\.)?soundcloud\.com$/.test(url.hostname));
+      (/^(?:www\.|m\.|on\.)?soundcloud\.com$/.test(url.hostname) ||
+        // Large SoundCloud sets only list IDs after the first few tracks.
+        (/^api(?:-v2)?\.soundcloud\.com$/.test(url.hostname) &&
+          /^\/tracks\/\d+\/?$/.test(url.pathname))));
   if (
     url.protocol !== "https:" ||
     url.username ||

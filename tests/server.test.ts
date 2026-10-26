@@ -97,6 +97,50 @@ describe("private server endpoints", () => {
     expect(result.tracks[0].mediaUrl).toMatch(/^\/api\/audio\?ticket=/);
     expect(result.tracks[0].title).toBe("A song");
   });
+  it("completes SoundCloud set entries that only list a track ID", async () => {
+    vi.mocked(extract).mockImplementation(async (url) =>
+      url.includes("/sets/")
+        ? {
+            title: "A set",
+            entries: [
+              {
+                title: "First",
+                url: "https://soundcloud.com/artist/first",
+              },
+              { id: "12", url: "https://api-v2.soundcloud.com/tracks/12" },
+              { id: "13", url: "https://api-v2.soundcloud.com/tracks/13" },
+            ],
+          }
+        : url.endsWith("/12")
+          ? {
+              title: "Second",
+              uploader: "Artist",
+              webpage_url: "https://soundcloud.com/artist/second",
+            }
+          : Promise.reject(new Error("unavailable")),
+    );
+    const response = await resolve(
+      new Request("http://localhost/api/resolve", {
+        method: "POST",
+        body: JSON.stringify({ url: "https://soundcloud.com/artist/sets/a" }),
+      }),
+    );
+    const { tracks } = await response.json();
+    expect(tracks.map((x: { title: string }) => x.title)).toEqual([
+      "First",
+      "Second",
+      "Untitled",
+    ]);
+    expect(tracks[1]).toMatchObject({
+      artist: "Artist",
+      sourceUrl: "https://soundcloud.com/artist/second",
+    });
+    expect(tracks[2].sourceUrl).toBe("https://api-v2.soundcloud.com/tracks/13");
+    expect(tracks.every((x: { mediaUrl?: string }) => x.mediaUrl)).toBe(true);
+    expect(() =>
+      allowedSource("https://api-v2.soundcloud.com/me/likes"),
+    ).toThrow();
+  });
   it("opens YouTube Music share links through the regular YouTube audio path", async () => {
     const shared =
       "https://music.youtube.com/watch?v=xKJtIjB3pAI&si=3ZN4Gzsw8cDL-uIf";

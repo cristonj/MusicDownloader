@@ -66,6 +66,44 @@ function downloadTrack(track: CatalogTrack, url: string): CatalogTrack {
     mediaUrl: `/api/audio?ticket=${signTicket({ kind: "source", url: source })}`,
   };
 }
+const stub = (entry: Extracted) =>
+  !entry.title &&
+  /^https:\/\/(?:[a-z0-9-]+\.)?soundcloud\.com\//.test(entry.url || "");
+// Flat SoundCloud sets carry no titles, and after the first five tracks only
+// API links by ID. Look each one up so it keeps its title and artist.
+async function completeStubs(entries: Extracted[], signal?: AbortSignal) {
+  const pending = entries.flatMap((entry, index) =>
+    stub(entry) ? [index] : [],
+  );
+  if (!pending.length) return;
+  const deadline = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(40000)])
+    : AbortSignal.timeout(40000);
+  await Promise.all(
+    Array.from({ length: Math.min(8, pending.length) }, async () => {
+      while (pending.length && !deadline.aborted) {
+        const index = pending.shift()!,
+          entry = entries[index];
+        try {
+          const found = await extract(entry.url!, true, deadline);
+          entries[index] = {
+            ...entry,
+            title: found.title,
+            track: found.track,
+            artist: found.artist,
+            uploader: found.uploader,
+            duration: found.duration ?? entry.duration,
+            webpage_url: found.webpage_url,
+            ext: found.ext,
+          };
+        } catch {
+          // Keep the original link; the track still downloads without a title.
+        }
+      }
+    }),
+  );
+  if (signal?.aborted) throw new HttpError(499, "Import cancelled.");
+}
 export async function resolveCatalog(value: string, signal?: AbortSignal) {
   const url = allowedSource(value);
   if (["spotify.link", "open.spotify.com"].includes(url.hostname)) {
@@ -82,6 +120,7 @@ export async function resolveCatalog(value: string, signal?: AbortSignal) {
   const entries = info.entries || [info];
   if (entries.length > MAX_TRACKS)
     throw new HttpError(422, "Import up to 100 tracks at a time.");
+  if (info.entries) await completeStubs(entries, signal);
   const tracks = entries.map((entry) => {
     const track: CatalogTrack = {
       title: entry.track || entry.title || "Untitled",
