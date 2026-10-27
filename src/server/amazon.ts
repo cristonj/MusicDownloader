@@ -27,13 +27,20 @@ interface Relation {
 const AGENT =
   "MusicDownloader/1.0 (https://github.com/cristonj/MusicDownloader)";
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-let lastCall = 0;
+// Imports can run side by side in one server, so each request claims its
+// second before it waits. Reading a shared time and then awaiting would let
+// everything that waited fire together.
+let nextSlot = 0;
+function reserveSlot(): number {
+  const slot = Math.max(Date.now(), nextSlot);
+  nextSlot = slot + 1000;
+  return slot - Date.now();
+}
 async function musicbrainz<T>(path: string): Promise<T | null> {
   const url = `https://musicbrainz.org/ws/2/${path}${path.includes("?") ? "&" : "?"}fmt=json`;
   for (let attempt = 0; attempt < 3; attempt++) {
     // One request a second, as the database asks of every client.
-    await pause(Math.max(0, lastCall + 1000 - Date.now()));
-    lastCall = Date.now();
+    await pause(reserveSlot());
     const response = await publicFetch(url, {
       headers: { "User-Agent": AGENT, Accept: "application/json" },
       signal: AbortSignal.timeout(10000),
@@ -114,12 +121,17 @@ export async function amazonMusicMetadata(
   const [, kind, asin] = path;
   // Share links for one song of an album name it in the query.
   const trackAsin = url.searchParams.get("trackAsin") || "";
+  // A link to one song imports that song or nothing: falling back to its
+  // album would add tracks nobody asked for.
   if (kind === "albums" && /^[A-Z0-9]{10}$/.test(trackAsin)) {
     const [relation] = await relationsFor(trackAsin, "recording");
-    if (relation?.recording) {
-      const track = recordingTrack(relation.recording);
-      return { title: track.title, tracks: [track] };
-    }
+    if (!relation?.recording)
+      throw new HttpError(
+        422,
+        "This Amazon Music song is not listed in the public music database, so its name cannot be read. Paste the album link without the song, or the song's Apple Music or Spotify link.",
+      );
+    const track = recordingTrack(relation.recording);
+    return { title: track.title, tracks: [track] };
   }
   if (kind === "playlists" || kind === "user-playlists")
     throw new HttpError(

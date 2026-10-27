@@ -565,10 +565,11 @@ describe("metadata-only services", () => {
       artist: "Tate McRae",
       duration: 208.81,
     });
-    // A song missing from the catalogue keeps the playlist's own details.
+    // A song missing from the catalogue keeps its own title and length, and
+    // is never credited to the playlist's curator.
     expect(result.tracks[1]).toMatchObject({
       title: "Uncatalogued",
-      artist: "Apple Music Hits",
+      artist: "",
       duration: 3723,
     });
   });
@@ -621,6 +622,45 @@ describe("metadata-only services", () => {
     expect(readTicket(result.tracks[1].matchTicket, "match").origin).toBe(
       "Amazon Music",
     );
+  });
+  it("keeps a one-song Amazon Music link to that song", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) =>
+      json(
+        // The database lists the album but not the individual song.
+        url.includes("/albums/") || url.includes("/dp/")
+          ? {
+              relations: [
+                {
+                  "target-type": "release",
+                  release: { id: "9c6bbc58", title: "An album" },
+                },
+              ],
+            }
+          : { relations: [] },
+      ),
+    );
+    const response = await importLink(
+      "https://music.amazon.com/albums/B0CH3YL376?trackAsin=B0CH3YL999",
+    );
+    // The album is reachable, but one song was asked for.
+    expect(response.status).toBe(422);
+    expect((await response.json()).detail).toMatch(/without the song/);
+  });
+  it("spaces MusicBrainz requests even when imports overlap", async () => {
+    const calls: number[] = [];
+    vi.mocked(publicFetch).mockImplementation(async () => {
+      calls.push(Date.now());
+      return json({ relations: [] });
+    });
+    const start = Date.now();
+    await Promise.all([
+      importLink("https://music.amazon.com/albums/B0CH3YL371"),
+      importLink("https://music.amazon.com/albums/B0CH3YL372"),
+    ]);
+    // Four lookups, each claiming its own second rather than firing together.
+    expect(calls.length).toBe(4);
+    for (const [index, time] of calls.entries())
+      expect(time - start).toBeGreaterThanOrEqual(index * 1000 - 50);
   });
   it("says why an Amazon Music playlist cannot be imported", async () => {
     const response = await importLink(

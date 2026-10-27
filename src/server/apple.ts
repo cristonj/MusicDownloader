@@ -95,7 +95,6 @@ async function playlistTracks(url: URL, country: string) {
   const html = (await response.text()).slice(0, 8 * 1024 * 1024);
   let playlist: {
     name?: string;
-    author?: { name?: string };
     track?: { name?: string; url?: string; duration?: string }[];
   } | null = null;
   for (const [, body] of html.matchAll(
@@ -132,9 +131,11 @@ async function playlistTracks(url: URL, country: string) {
       const seconds = entry.duration?.match(
         /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/,
       );
+      // The playlist names its curator, not the song's artist, so a song the
+      // catalogue does not list is matched and tagged by title alone.
       return {
         title: (entry.name || "Untitled").slice(0, 300),
-        artist: (playlist.author?.name || "").slice(0, 200),
+        artist: "",
         duration: seconds
           ? Number(seconds[1] || 0) * 3600 +
             Number(seconds[2] || 0) * 60 +
