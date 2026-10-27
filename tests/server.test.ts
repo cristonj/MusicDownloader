@@ -7,7 +7,8 @@ import {
   readTicket,
   signTicket,
 } from "../src/server/security";
-import { matchScore, matchTrack } from "../src/server/catalog";
+import { matchScore, matchTrack, songName } from "../src/server/catalog";
+import { providerFor } from "../src/lib/model";
 import { CHUNK_BYTES, hlsManifest, mediaChunk } from "../src/server/media";
 import { mediaFetch, publicFetch } from "../src/server/upstream";
 import { extract } from "../src/server/extractor";
@@ -705,6 +706,93 @@ describe("metadata-only services", () => {
     );
     expect(response.status).toBe(422);
     expect((await response.json()).detail).toMatch(/public music database/);
+  });
+});
+describe("short-form sources", () => {
+  it("opens a Short as the recording it is", () => {
+    const short = allowedSource(
+      "https://www.youtube.com/shorts/xKJtIjB3pAI?si=3ZN4Gzsw8cDL",
+    );
+    // One extraction path and one cache entry, whichever page it was on.
+    expect(short.href).toBe("https://www.youtube.com/watch?v=xKJtIjB3pAI");
+    // Anything that is not a video id is left for the extractor to reject,
+    // as any other YouTube path is.
+    expect(allowedSource("https://www.youtube.com/shorts/not-an-id").href).toBe(
+      "https://www.youtube.com/shorts/not-an-id",
+    );
+  });
+  it("accepts TikTok posts and rejects lookalikes", () => {
+    for (const url of [
+      "https://www.tiktok.com/@artist/video/7016181462140628225",
+      "https://vm.tiktok.com/ZGJabcdef/",
+      "https://tiktok.com/@artist/video/7016181462140628225",
+    ])
+      expect(providerFor(allowedSource(url))).toBe("TikTok");
+    for (const url of [
+      "https://tiktok.com.attacker.test/@artist/video/1",
+      "http://www.tiktok.com/@artist/video/1",
+    ])
+      expect(() => allowedSource(url)).toThrow();
+  });
+  it("sends an IP-blocked post to the listener's own connection", async () => {
+    const { extractionFailure } =
+      await import("../src/server/extraction-error");
+    const failure = extractionFailure(
+      "ERROR: [TikTok] 7016181462140628225: Your IP address is blocked from accessing this post",
+      false,
+    );
+    // The browser offers the desktop helper on exactly this wording.
+    expect(failure.message).toMatch(/blocking requests from this web server/);
+  });
+});
+describe("upload titles read as song names", () => {
+  it("drops format tags, credit chains, and the artist before the dash", () => {
+    const cases: [string, string, string, string][] = [
+      // [upload title, uploader, song, artist]
+      [
+        "Shakira, Burna Boy - Dai Dai (Official Video)",
+        "Shakira",
+        "Dai Dai",
+        "Shakira, Burna Boy",
+      ],
+      [
+        "KALYANI (with Shreya Ghoshal) OFFICIAL MUSIC VIDEO | ARJN | KDS | FIFTY4",
+        "MONEY VERSE RECORDS",
+        "KALYANI (with Shreya Ghoshal)",
+        "MONEY VERSE RECORDS",
+      ],
+      // What follows the dash is only a tag, so the name is what precedes it.
+      [
+        "Ala Bolelo – Lyric Video | Jailer 2 | Superstar Rajinikanth",
+        "Sun TV",
+        "Ala Bolelo",
+        "Sun TV",
+      ],
+      [
+        "A2O LITE 'NEON' Official Video",
+        "A2O WORLD",
+        "A2O LITE 'NEON'",
+        "A2O WORLD",
+      ],
+      [
+        "Olivia Rodrigo - expectations (feat. Chappell Roan) (Official Music Video)",
+        "Olivia Rodrigo",
+        "expectations (feat. Chappell Roan)",
+        "Olivia Rodrigo",
+      ],
+      // Names that are already names are left alone.
+      ["lofi hip hop radio", "ChilledCow", "lofi hip hop radio", "ChilledCow"],
+      // Short first segments are names, not credits.
+      ["Artist | Song", "Someone", "Artist | Song", "Someone"],
+      [
+        "Casa Tupka Anthemo | @YoYoHoneySingh | Full Video",
+        "Yo Yo Honey Singh",
+        "Casa Tupka Anthemo",
+        "Yo Yo Honey Singh",
+      ],
+    ];
+    for (const [title, uploader, song, artist] of cases)
+      expect(songName(title, uploader)).toEqual({ title: song, artist });
   });
 });
 describe("service feeds", () => {

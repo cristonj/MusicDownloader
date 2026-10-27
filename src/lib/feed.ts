@@ -1,6 +1,6 @@
 import { helperConnection, sourceFetch } from "./helper";
 import { trackFromItem } from "./sources";
-import type { Provider, Track } from "./model";
+import { isArtworkUrl, type Provider, type Track } from "./model";
 // The services whose own chart or search is public. Amazon Music and Bandcamp
 // publish neither without an account, so they have no column.
 export const FEED_PROVIDERS: Provider[] = [
@@ -11,8 +11,10 @@ export const FEED_PROVIDERS: Provider[] = [
 ];
 export interface FeedRow {
   title: string;
+  fullTitle?: string;
   artist: string;
   duration?: number;
+  artwork?: string;
   mediaUrl?: string;
   sourceUrl?: string;
   extension?: string;
@@ -26,8 +28,16 @@ export interface FeedColumn {
 }
 const row = (item: Record<string, unknown>): FeedRow => ({
   title: typeof item.title === "string" ? item.title.slice(0, 300) : "Untitled",
+  fullTitle:
+    typeof item.fullTitle === "string"
+      ? item.fullTitle.slice(0, 300)
+      : undefined,
   artist: typeof item.artist === "string" ? item.artist.slice(0, 200) : "",
   duration: typeof item.duration === "number" ? item.duration : undefined,
+  artwork:
+    typeof item.artwork === "string" && isArtworkUrl(item.artwork)
+      ? item.artwork
+      : undefined,
   mediaUrl: typeof item.mediaUrl === "string" ? item.mediaUrl : undefined,
   sourceUrl: typeof item.sourceUrl === "string" ? item.sourceUrl : undefined,
   extension: typeof item.extension === "string" ? item.extension : undefined,
@@ -39,6 +49,7 @@ const row = (item: Record<string, unknown>): FeedRow => ({
 export async function loadFeed(
   provider: Provider,
   query: string,
+  size: number,
   signal: AbortSignal,
 ): Promise<FeedColumn> {
   const response = await sourceFetch(
@@ -46,7 +57,7 @@ export async function loadFeed(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, query }),
+      body: JSON.stringify({ provider, query, size }),
       signal,
     },
     helperConnection() ? "helper" : undefined,

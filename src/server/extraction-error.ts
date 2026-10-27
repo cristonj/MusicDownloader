@@ -55,7 +55,7 @@ export function extractionFailure(
       422,
     );
   if (
-    /confirm.{0,30}not a bot|bot.?check|automated (?:queries|requests)|too many requests|HTTP Error 429/i.test(
+    /confirm.{0,30}not a bot|bot.?check|automated (?:queries|requests)|too many requests|HTTP Error 429|IP address is blocked/i.test(
       stderr,
     )
   )

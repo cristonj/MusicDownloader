@@ -1,4 +1,4 @@
-import { feedFor, FEED_PROVIDERS } from "@/server/feed";
+import { feedFor, FEED_PROVIDERS, FEED_SIZE } from "@/server/feed";
 import {
   errorResponse,
   guardRequest,
@@ -21,8 +21,9 @@ export async function POST(request: Request) {
     if (data.query !== undefined && typeof data.query !== "string")
       throw new HttpError(400, "Use text to search.");
     const query = (data.query || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    const size = typeof data.size === "number" ? data.size : FEED_SIZE;
     return Response.json(
-      await feedFor(data.provider as Provider, query, request.signal),
+      await feedFor(data.provider as Provider, query, size, request.signal),
       { headers: privateHeaders },
     );
   } catch (error) {

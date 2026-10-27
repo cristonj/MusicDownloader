@@ -75,8 +75,14 @@ export function sourceFetch(
 ): Promise<Response> {
   return transport === "helper" ? helperFetch(path, init) : fetch(path, init);
 }
+// Every download is a GitHub release asset of this open-source repository.
+export const HELPER_RELEASE =
+  "https://github.com/cristonj/MusicDownloader/releases/tag/helper-v1";
+export const HELPER_SOURCE = "https://github.com/cristonj/MusicDownloader";
 export const helperDownloads = {
   windows:
+    "https://github.com/cristonj/MusicDownloader/releases/download/helper-v1/MusicDownloader-Helper-Windows-Setup.exe",
+  windowsPortable:
     "https://github.com/cristonj/MusicDownloader/releases/download/helper-v1/MusicDownloader-Helper-Windows.exe",
   mac: "https://github.com/cristonj/MusicDownloader/releases/download/helper-v1/MusicDownloader-Helper-Mac.zip",
   linux:

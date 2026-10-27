@@ -140,9 +140,10 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
     "href",
     "https://www.youtube.com/watch?v=abcdefghijk",
   );
+  // Every match arrives selected; the uncertain ones are flagged instead.
   await expect(
     page.getByLabel("Select A favorite", { exact: true }),
-  ).not.toBeChecked();
+  ).toBeChecked();
   await expect(
     page.getByLabel("Select Missing recording", { exact: true }),
   ).toBeDisabled();
@@ -190,10 +191,11 @@ test("Apple Music imports its track list and waits for review", async ({
   await expect(page.locator(".notice[role=status]")).toContainText(
     "Apple Music imported",
   );
-  // A fan upload is a possible match, so it is not selected for the listener.
+  // A fan upload is selected like any other, and flagged by its colour.
   await expect(
     page.getByLabel("Select Better Together", { exact: true }),
-  ).not.toBeChecked();
+  ).toBeChecked();
+  await expect(page.locator("a.match-source.match-fair")).toBeVisible();
 });
 
 test("the service feed browses charts and adds a row to the collection", async ({

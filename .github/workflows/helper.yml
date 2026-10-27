@@ -48,6 +48,8 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build executable
+        env:
+          HELPER_VERSION: 1.0.${{ github.run_number }}
         run: node scripts/build-helper.mjs ${{ matrix.platform }} x64
       - name: Package Windows download
         if: matrix.platform == 'win32'
@@ -55,6 +57,15 @@ jobs:
         run: |
           & ./helper-dist/MusicDownloader-Helper-win32-x64.exe --self-test
           Copy-Item helper-dist/MusicDownloader-Helper-win32-x64.exe helper-dist/MusicDownloader-Helper-Windows.exe
+          # An installer gives the helper a Start menu entry, an uninstall
+          # entry, and an update that replaces the installed copy in place.
+          choco install innosetup --no-progress -y
+          $version = "1.0.$env:GITHUB_RUN_NUMBER"
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          & $iscc /DAppVersion=$version /O"helper-dist" scripts/windows-installer.iss
+          Get-ChildItem helper-dist/*.exe | ForEach-Object {
+            "{0}: {1:N1} MB" -f $_.Name, ($_.Length / 1MB)
+          }
       - name: Package Linux download
         if: matrix.platform == 'linux'
         run: |
@@ -75,12 +86,14 @@ jobs:
           fail_on_unmatched_files: false
           body: |
             Download the helper for your computer, open it, and approve the browser connection.
+            Windows: the Setup download installs the helper as an application and replaces an older installed copy. The plain .exe is the same helper without an installer.
             Python and Node are included; neither needs to be installed.
             Keep the helper running while using MusicDownloader. Quit it from the app's helper setup.
             These builds are unsigned and your operating system may ask you to allow them.
             Mac: unzip, then open MusicDownloader Helper.app. Supports Apple Silicon and Intel.
             Source and third-party notices: https://github.com/cristonj/MusicDownloader
           files: |
+            helper-dist/MusicDownloader-Helper-Windows-Setup.exe
             helper-dist/MusicDownloader-Helper-Windows.exe
             helper-dist/MusicDownloader-Helper-Linux.tar.gz
             helper-dist/MusicDownloader-Helper-Mac.zip

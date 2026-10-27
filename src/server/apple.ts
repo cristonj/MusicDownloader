@@ -1,10 +1,11 @@
 import { HttpError } from "./security";
 import { publicFetch } from "./upstream";
-import { MAX_TRACKS } from "@/lib/model";
+import { isArtworkUrl, MAX_TRACKS } from "@/lib/model";
 export interface MetadataTrack {
   title: string;
   artist: string;
   duration?: number;
+  artwork?: string;
 }
 interface ItunesResult {
   wrapperType?: string;
@@ -14,6 +15,7 @@ interface ItunesResult {
   artistName?: string;
   trackTimeMillis?: number;
   trackId?: number;
+  artworkUrl100?: string;
 }
 async function appleFetch(value: string): Promise<Response> {
   let url = new URL(value);
@@ -84,6 +86,11 @@ const songTrack = (song: ItunesResult): MetadataTrack => ({
   duration:
     typeof song.trackTimeMillis === "number"
       ? song.trackTimeMillis / 1000
+      : undefined,
+  // The catalogue serves any size from the same path.
+  artwork:
+    song.artworkUrl100 && isArtworkUrl(song.artworkUrl100)
+      ? song.artworkUrl100.replace(/\/100x100bb\.jpg$/, "/300x300bb.jpg")
       : undefined,
 });
 const isSong = (result: ItunesResult) =>
@@ -163,6 +170,22 @@ export async function itunesSearch(
   if (!data || !Array.isArray(data.results))
     throw new HttpError(422, "Apple Music could not run that search.");
   return data.results.filter(isSong).map(songTrack);
+}
+// Cover art for a song whose own service publishes none. The catalogue
+// answers in about a tenth of a second, where searching a video site would
+// cost an extraction per song.
+export async function artworkSearch(
+  title: string,
+  artist: string,
+): Promise<string | undefined> {
+  const term = `${artist} ${title}`.trim().slice(0, 120);
+  if (!term) return undefined;
+  try {
+    const [song] = await itunesSearch(term, 1);
+    return song?.artwork;
+  } catch {
+    return undefined;
+  }
 }
 export async function appleMusicMetadata(
   value: string,

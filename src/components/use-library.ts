@@ -203,7 +203,7 @@ export function useLibrary() {
         const matched = result.tracks.find((t) => isMatchProvider(t.provider));
         if (matched)
           notify(
-            `${matched.provider} imported. Confident matches are selected; review the rest before downloading.`,
+            `${matched.provider} imported and selected. Flagged matches are worth a listen before downloading.`,
           );
       }
       return true;

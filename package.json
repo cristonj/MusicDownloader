@@ -36,6 +36,7 @@
     "@types/react-dom": "^19.1.0",
     "@yao-pkg/pkg": "6.24.0",
     "esbuild": "0.28.2",
+    "rcedit": "^5.0.2",
     "typescript": "^5.9.0",
     "vitest": "^3.2.4"
   }

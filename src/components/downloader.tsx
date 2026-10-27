@@ -150,6 +150,14 @@ function ServiceGlyph({
     );
   return <FileAudio size={size} />;
 }
+// How sure a match is, shown as a colour on the row so an uncertain one is
+// obvious without reading the percentage.
+function matchLevel(confidence?: number) {
+  if (confidence === undefined) return "";
+  if (confidence >= 0.8) return "match-sure";
+  if (confidence >= 0.6) return "match-fair";
+  return "match-weak";
+}
 const providers: Provider[] = [
   "YouTube",
   "Spotify",
@@ -381,7 +389,9 @@ export default function Downloader() {
         if (!locked) library.addFiles(event.dataTransfer.files);
       }}
     >
-      <div className="main-shell minimal-shell">
+      <div
+        className={`main-shell minimal-shell ${prefs.feed ? "wide-shell" : ""}`}
+      >
         <header className="topbar">
           <Brand compact />
           <div className="topbar-right">
@@ -504,6 +514,8 @@ export default function Downloader() {
               add={library.addFeedRow}
               busy={locked}
               icon={(provider) => <ServiceIcon provider={provider} size={15} />}
+              hidden={prefs.feedHidden}
+              setHidden={(feedHidden) => library.changePrefs({ feedHidden })}
             />
           )}
 
@@ -689,6 +701,15 @@ export default function Downloader() {
                         }
                         aria-label={`${playingId === track.id || loadingId === track.id ? "Stop" : "Preview"} ${track.title}`}
                       >
+                        {track.artwork && (
+                          <img
+                            src={track.artwork}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            referrerPolicy="no-referrer"
+                          />
+                        )}
                         {loadingId === track.id ? (
                           <LoaderCircle size={17} className="spin" />
                         ) : playingId === track.id ? (
@@ -712,7 +733,7 @@ export default function Downloader() {
                         {track.matchedTitle ? (
                           <>
                             <a
-                              className="match-source"
+                              className={`match-source ${matchLevel(track.matchConfidence)}`}
                               href={track.sourceUrl}
                               target="_blank"
                               rel="noreferrer"

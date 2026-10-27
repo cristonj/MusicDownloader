@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { Check, Download, LoaderCircle, X } from "lucide-react";
 import {
+  HELPER_RELEASE,
+  HELPER_SOURCE,
   helperDownloads,
   helperConnection,
   helperFetch,
@@ -140,9 +142,29 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
             >
               <Download size={16} />
               {downloads[platform]
-                ? `Download helper${platform === "windows" ? " .exe" : ""}`
+                ? platform === "windows"
+                  ? "Download installer"
+                  : "Download helper"
                 : "Preparing download…"}
             </a>
+            <small className="helper-source">
+              From{" "}
+              <a href={HELPER_RELEASE} target="_blank" rel="noreferrer">
+                GitHub Releases
+              </a>
+              , built by GitHub Actions from this{" "}
+              <a href={HELPER_SOURCE} target="_blank" rel="noreferrer">
+                open-source repository
+              </a>
+              .
+              {platform === "windows" && downloads.windowsPortable && (
+                <>
+                  {" "}
+                  <a href={helperDownloads.windowsPortable}>Portable .exe</a> if
+                  you would rather not install.
+                </>
+              )}
+            </small>
           </li>
           <li>
             <strong>Open the download</strong>
@@ -151,7 +173,7 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
                 ? "Unzip and open MusicDownloader Helper."
                 : platform === "linux"
                   ? "Extract and open MusicDownloader-Helper."
-                  : "Open MusicDownloader Helper."}{" "}
+                  : "Run the installer. It adds MusicDownloader Helper to your Start menu and replaces an older installed version, then opens it."}{" "}
               Keep it running while you download.
             </p>
             <small>

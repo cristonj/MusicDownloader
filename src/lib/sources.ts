@@ -5,6 +5,7 @@ import {
 } from "./helper";
 import {
   extensionFor,
+  isArtworkUrl,
   isMatchProvider,
   isMediaHost,
   MAX_FILE_BYTES,
@@ -84,6 +85,10 @@ export function trackFromItem(
     title: item.title.slice(0, 300),
     artist: typeof item.artist === "string" ? item.artist.slice(0, 200) : "",
     duration: typeof item.duration === "number" ? item.duration : undefined,
+    artwork:
+      typeof item.artwork === "string" && isArtworkUrl(item.artwork)
+        ? item.artwork
+        : undefined,
     provider,
     transport,
     mediaUrl: typeof item.mediaUrl === "string" ? item.mediaUrl : undefined,
@@ -122,10 +127,9 @@ export function trackFromItem(
         : typeof item.matchTicket === "string"
           ? item.matchTicket
           : undefined,
-    // Only confident matches start selected; the rest wait for review.
-    selected:
-      !item.error &&
-      (!isMatchProvider(provider) || item.matchConfident === true),
+    // Every match starts selected; the uncertain ones are flagged in the
+    // list rather than left for the listener to tick one by one.
+    selected: !item.error,
     status: item.error ? "error" : "ready",
     error: typeof item.error === "string" ? item.error : undefined,
     progress: 0,
