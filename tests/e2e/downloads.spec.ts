@@ -239,7 +239,7 @@ test("the service feed browses charts and adds a row to the collection", async (
   });
   await page.goto("/");
   // Every service gets its own column, including one that has no chart.
-  await expect(page.locator(".feed-column")).toHaveCount(4);
+  await expect(page.locator(".feed-card")).toHaveCount(4);
   await expect(page.getByText("A charting song")).toBeVisible();
   await expect(
     page.getByText("SoundCloud publishes no public chart."),
