@@ -140,9 +140,10 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
     "href",
     "https://www.youtube.com/watch?v=abcdefghijk",
   );
+  // Every match arrives selected; the uncertain ones are flagged instead.
   await expect(
     page.getByLabel("Select A favorite", { exact: true }),
-  ).not.toBeChecked();
+  ).toBeChecked();
   await expect(
     page.getByLabel("Select Missing recording", { exact: true }),
   ).toBeDisabled();
@@ -153,6 +154,125 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
   await expect(
     page.getByRole("button", { name: "Download track", exact: true }),
   ).toBeEnabled();
+});
+
+test("Apple Music imports its track list and waits for review", async ({
+  page,
+}) => {
+  await page.route("**/api/resolve", (route) =>
+    route.fulfill({
+      json: {
+        title: "In Between Dreams",
+        tracks: [
+          {
+            title: "Better Together",
+            artist: "Jack Johnson",
+            duration: 207,
+            extension: "m4a",
+            mediaUrl: "/api/audio?ticket=signed",
+            sourceUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+            matchedTitle: "Jack Johnson - Better Together",
+            matchConfidence: 0.7,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Apple Music" }).click();
+  await expect(page.getByLabel("Music or playlist link")).toHaveAttribute(
+    "placeholder",
+    /Apple Music song, album, or playlist/,
+  );
+  await page
+    .getByLabel("Music or playlist link")
+    .fill("https://music.apple.com/us/album/in-between-dreams/1440857781");
+  await page.getByRole("button", { name: "Add music link" }).click();
+  await expect(page.locator(".notice[role=status]")).toContainText(
+    "Apple Music imported",
+  );
+  // A fan upload is selected like any other, and flagged by its colour.
+  await expect(
+    page.getByLabel("Select Better Together", { exact: true }),
+  ).toBeChecked();
+  await expect(page.locator("a.match-source.match-fair")).toBeVisible();
+});
+
+test("the service feed browses charts and adds a row to the collection", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "music-downloader:preferences",
+      JSON.stringify({ format: "original", feed: true }),
+    ),
+  );
+  await page.route("**/api/feed", async (route) => {
+    const { provider } = route.request().postDataJSON();
+    if (provider === "SoundCloud")
+      return route.fulfill({
+        status: 422,
+        json: { detail: "SoundCloud publishes no public chart." },
+      });
+    return route.fulfill({
+      json: {
+        title: `${provider} chart`,
+        tracks: [
+          provider === "YouTube"
+            ? {
+                title: "A charting song",
+                artist: "An artist",
+                duration: 200,
+                extension: "m4a",
+                mediaUrl: "/api/audio?ticket=signed",
+                sourceUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+              }
+            : {
+                title: `${provider} pick`,
+                artist: "An artist",
+                duration: 200,
+                matchTicket: "signed-match",
+              },
+        ],
+      },
+    });
+  });
+  await page.goto("/");
+  // Every service gets its own column, including one that has no chart.
+  await expect(page.locator(".feed-column")).toHaveCount(4);
+  await expect(page.getByText("A charting song")).toBeVisible();
+  await expect(
+    page.getByText("SoundCloud publishes no public chart."),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Add A charting song from YouTube" })
+    .click();
+  await expect(page.getByText("A charting song")).toHaveCount(2);
+  await expect(
+    page.getByRole("button", { name: "Download track", exact: true }),
+  ).toBeEnabled();
+  // A row of names is matched when it is added, not while browsing.
+  let matched = false;
+  await page.route("**/api/match", (route) => {
+    matched = true;
+    return route.fulfill({
+      json: {
+        title: "Spotify pick",
+        artist: "An artist",
+        extension: "m4a",
+        mediaUrl: "/api/audio?ticket=signed",
+        sourceUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+        matchedTitle: "An artist - Spotify pick",
+        matchConfidence: 0.9,
+      },
+    });
+  });
+  await page
+    .getByRole("button", { name: "Add Spotify pick from Spotify" })
+    .click();
+  // The feed row and the collection row; the match label names it too.
+  await expect(page.getByText("Spotify pick", { exact: true })).toHaveCount(2);
+  expect(matched).toBe(true);
 });
 
 test("errors are actionable and settings persist", async ({ page }) => {
@@ -169,6 +289,14 @@ test("errors are actionable and settings persist", async ({ page }) => {
   await expect(page.getByRole("dialog")).not.toContainText(
     /resolver|service imports|connection/i,
   );
+  // The feed is off until it is asked for, and stays as it is left.
+  await expect(page.locator(".feed")).toHaveCount(0);
+  await page.getByLabel("Show service feeds").check();
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await expect(page.locator(".feed")).toBeVisible();
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await expect(page.getByLabel("Show service feeds")).toBeChecked();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).not.toBeVisible();
 });

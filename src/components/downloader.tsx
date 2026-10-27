@@ -32,6 +32,7 @@ import {
   type Track,
 } from "@/lib/model";
 import { fetchAudio } from "@/lib/sources";
+import Feed from "./feed";
 import HelperSetup from "./helper-setup";
 import { useLibrary } from "./use-library";
 
@@ -49,7 +50,24 @@ function Brand({ compact = false }: { compact?: boolean }) {
     </div>
   );
 }
+// The services' own colours, kept on one wrapper so chips, feed headers, and
+// track rows all mark a provider the same way.
 function ServiceIcon({
+  provider,
+  size = 16,
+}: {
+  provider: Provider;
+  size?: number;
+}) {
+  return (
+    <span
+      className={`provider-mark provider-${provider.toLowerCase().replace(/\s+/g, "-")}`}
+    >
+      <ServiceGlyph provider={provider} size={size} />
+    </span>
+  );
+}
+function ServiceGlyph({
   provider,
   size = 16,
 }: {
@@ -86,6 +104,37 @@ function ServiceIcon({
         />
       </svg>
     );
+  if (provider === "Apple Music")
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path d="M16.7 12.6c0-2 1.6-3 1.7-3.1-1-1.4-2.4-1.6-2.9-1.6-1.3-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7-1.4 0-2.6.8-3.3 2-1.4 2.4-.4 6 1 8 .7 1 1.5 2 2.5 2 1 0 1.3-.6 2.5-.6s1.5.6 2.5.6 1.7-.9 2.4-1.9c.8-1.1 1.1-2.2 1.1-2.3-.1 0-2.1-.8-2.1-3.1ZM14.3 5.9c.5-.6.9-1.5.8-2.4-.8 0-1.7.5-2.3 1.2-.5.6-.9 1.5-.8 2.3.9.1 1.8-.4 2.3-1.1Z" />
+      </svg>
+    );
+  if (provider === "Amazon Music")
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="11" fill="currentColor" />
+        <path
+          d="M9 15.5V8l5.5 1.4v5.3M9 15.5a1.6 1.6 0 1 1-1.6-1.6c.6 0 1.2.3 1.6.8m5.5-1.3a1.6 1.6 0 1 1-1.6-1.6c.7 0 1.3.3 1.6.8"
+          stroke="var(--surface)"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
   if (provider === "SoundCloud") return <AudioLines size={size} />;
   if (provider === "Bandcamp")
     return (
@@ -101,10 +150,27 @@ function ServiceIcon({
     );
   return <FileAudio size={size} />;
 }
-const providers: Provider[] = ["YouTube", "Spotify", "SoundCloud", "Bandcamp"];
+// How sure a match is, shown as a colour on the row so an uncertain one is
+// obvious without reading the percentage.
+function matchLevel(confidence?: number) {
+  if (confidence === undefined) return "";
+  if (confidence >= 0.8) return "match-sure";
+  if (confidence >= 0.6) return "match-fair";
+  return "match-weak";
+}
+const providers: Provider[] = [
+  "YouTube",
+  "Spotify",
+  "Apple Music",
+  "Amazon Music",
+  "SoundCloud",
+  "Bandcamp",
+];
 const placeholders: Record<string, string> = {
   YouTube: "Paste a YouTube song or playlist link",
   Spotify: "Paste a Spotify song, album, or playlist link",
+  "Apple Music": "Paste an Apple Music song, album, or playlist link",
+  "Amazon Music": "Paste an Amazon Music song or album link",
   SoundCloud: "Paste a SoundCloud track or set link",
   Bandcamp: "Paste a Bandcamp track or album link",
 };
@@ -323,7 +389,9 @@ export default function Downloader() {
         if (!locked) library.addFiles(event.dataTransfer.files);
       }}
     >
-      <div className="main-shell minimal-shell">
+      <div
+        className={`main-shell minimal-shell ${prefs.feed ? "wide-shell" : ""}`}
+      >
         <header className="topbar">
           <Brand compact />
           <div className="topbar-right">
@@ -398,7 +466,7 @@ export default function Downloader() {
                 {providers.map((provider) => (
                   <button
                     key={provider}
-                    className={`service-chip ${activeProvider === provider ? "chosen" : ""}`}
+                    className={`service-chip provider-${provider.toLowerCase().replace(/\s+/g, "-")} ${activeProvider === provider ? "chosen" : ""}`}
                     onClick={() => {
                       setActiveProvider(
                         activeProvider === provider ? null : provider,
@@ -440,6 +508,16 @@ export default function Downloader() {
               }}
             />
           </section>
+
+          {prefs.feed && library.hydrated && (
+            <Feed
+              add={library.addFeedRow}
+              busy={locked}
+              icon={(provider) => <ServiceIcon provider={provider} size={15} />}
+              hidden={prefs.feedHidden}
+              setHidden={(feedHidden) => library.changePrefs({ feedHidden })}
+            />
+          )}
 
           <section className="format-bar" aria-label="Export settings">
             <div className="format-controls">
@@ -623,6 +701,15 @@ export default function Downloader() {
                         }
                         aria-label={`${playingId === track.id || loadingId === track.id ? "Stop" : "Preview"} ${track.title}`}
                       >
+                        {track.artwork && (
+                          <img
+                            src={track.artwork}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            referrerPolicy="no-referrer"
+                          />
+                        )}
                         {loadingId === track.id ? (
                           <LoaderCircle size={17} className="spin" />
                         ) : playingId === track.id ? (
@@ -646,7 +733,7 @@ export default function Downloader() {
                         {track.matchedTitle ? (
                           <>
                             <a
-                              className="match-source"
+                              className={`match-source ${matchLevel(track.matchConfidence)}`}
                               href={track.sourceUrl}
                               target="_blank"
                               rel="noreferrer"
@@ -905,9 +992,11 @@ export default function Downloader() {
                   <strong>About service links</strong>
                   <p>
                     The desktop helper opens links using your connection.
-                    Spotify supplies the track list; audio comes from the
-                    YouTube matches you select. Bandcamp purchases and private
-                    or restricted tracks need your original files.
+                    Spotify, Apple Music, and Amazon Music supply the track
+                    list; audio comes from the YouTube matches you select.
+                    Amazon Music playlists stay behind its sign-in, so paste its
+                    album or song links. Bandcamp purchases and private or
+                    restricted tracks need your original files.
                   </p>
                 </div>
                 <button
@@ -925,6 +1014,34 @@ export default function Downloader() {
                 <p className="modal-description">
                   Saved in this browser. No account needed.
                 </p>
+                <div className="settings-section">
+                  <h3>Discover</h3>
+                  <label className="settings-row">
+                    <span>
+                      Service feeds
+                      <small>
+                        Shows each service&apos;s own chart, and one search
+                        across all of them, under the link field.
+                      </small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      className="settings-toggle"
+                      aria-label="Show service feeds"
+                      checked={prefs.feed}
+                      disabled={locked}
+                      onChange={(event) =>
+                        library.changePrefs({ feed: event.target.checked })
+                      }
+                    />
+                  </label>
+                  <p className="settings-note">
+                    YouTube, Spotify, and Apple Music publish a chart anyone can
+                    read; YouTube, Apple Music, and SoundCloud also publish a
+                    search. Amazon Music and Bandcamp publish neither without an
+                    account, so they have no column.
+                  </p>
+                </div>
                 <div className="settings-section">
                   <h3>Audio</h3>
                   <label className="settings-row">

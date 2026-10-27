@@ -1,11 +1,21 @@
-import { durationLabel, MAX_TRACKS, providerFor } from "@/lib/model";
+import {
+  durationLabel,
+  isArtworkUrl,
+  MAX_TRACKS,
+  providerFor,
+} from "@/lib/model";
+import { appleMusicMetadata } from "./apple";
+import { amazonMusicMetadata } from "./amazon";
 import { allowedSource, HttpError, signTicket } from "./security";
 import { extract, type Extracted } from "./extractor";
 import { spotifyMetadata } from "./spotify";
 export interface CatalogTrack {
   title: string;
+  // The upload's own title, when a shorter song name is shown instead.
+  fullTitle?: string;
   artist: string;
   duration?: number;
+  artwork?: string;
   mediaUrl?: string;
   sourceUrl?: string;
   extension?: string;
@@ -18,6 +28,61 @@ export interface CatalogTrack {
   matchTicket?: string;
   lookupTicket?: string;
   fallbackTicket?: string;
+}
+// The services publish cover art with their listings. A square-ish image of
+// about 300px reads well in the feed without pulling a needless full-size one.
+export function artworkFor(entry: Extracted): string | undefined {
+  if (/^[a-zA-Z0-9_-]{11}$/.test(entry.id || ""))
+    return `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg`;
+  const sized = (entry.thumbnails || []).filter(
+    (thumb) => thumb.url && isArtworkUrl(thumb.url),
+  );
+  const best =
+    sized
+      .filter((thumb) => (thumb.width || 0) >= 200 && (thumb.width || 0) <= 800)
+      .sort((a, b) => (a.width || 0) - (b.width || 0))[0] ||
+    sized.sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+  const found = best?.url || entry.thumbnail;
+  return found && isArtworkUrl(found) ? found : undefined;
+}
+// Upload titles carry promotion a song name does not: format tags, credit
+// chains, and the artist repeated ahead of a dash. The feed shows the song,
+// and keeps the upload's own title for the listener to check.
+const TAGS =
+  /\s*[([]\s*(?:official\s*)?(?:music\s*)?(?:video|audio|visuali[sz]er|lyrics?(?:\s*video)?|mv|hd|4k|full\s*(?:video|song)|video\s*song)\s*[)\]]/gi;
+// The same words also appear unbracketed at the end of an upload's title.
+const TRAILING_TAG =
+  /\s*[-–—|·]?\s*\b(?:official\s+)?(?:music\s+)?(?:video|audio|visuali[sz]er|lyrics?(?:\s+video)?|mv|full\s+(?:video|song)|video\s+song)\b\s*$/i;
+// A name that is only a format tag is not a song name.
+const TAG_ONLY =
+  /^(?:(?:official\s+)?(?:music\s+)?(?:video|audio|visuali[sz]er|lyrics?(?:\s+video)?|mv|full\s+(?:video|song)|video\s+song)|hd|4k)$/i;
+const tidy = (value: string) =>
+  value
+    .replace(TAGS, " ")
+    .replace(/\s+/g, " ")
+    .replace(TRAILING_TAG, "")
+    .replace(/[\s|,·-]+$/, "")
+    .trim();
+export function songName(title: string, artist: string) {
+  let name = tidy(title);
+  const segments = name.split(/\s*\|\s*/).filter(Boolean);
+  // Pipes separate a name from its credits: three segments is a chain, and
+  // two is one too, once the first is long enough to be the name itself.
+  if (
+    (segments.length >= 3 && segments[0].length >= 3) ||
+    (segments.length === 2 && segments[0].length >= 10)
+  )
+    name = tidy(segments[0]);
+  const credited = name.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if (credited) {
+    const song = tidy(credited[2]);
+    // "Artist - Song", unless what follows the dash was only a format tag.
+    if (song.length >= 2 && !TAG_ONLY.test(song))
+      return { title: song, artist: tidy(credited[1]) || artist };
+    const left = tidy(credited[1]);
+    if (left.length >= 2) return { title: left, artist };
+  }
+  return { title: name || title, artist };
 }
 const words = (s: string) =>
   new Set(s.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
@@ -95,7 +160,7 @@ function searchNames(track: CatalogTrack) {
     duration: track.duration,
   };
 }
-function catalogTrack(
+export function catalogTrack(
   entry: Extracted,
   source: string,
   albumArtist = "",
@@ -105,6 +170,7 @@ function catalogTrack(
     artist:
       entry.artist || entry.uploader || entry.channel || albumArtist || "",
     duration: entry.duration,
+    artwork: artworkFor(entry),
     extension: entry.ext || "m4a",
   };
   if (entry.is_live)
@@ -143,13 +209,24 @@ function catalogTrack(
 }
 export async function resolveCatalog(value: string, signal?: AbortSignal) {
   const url = allowedSource(value);
-  if (["spotify.link", "open.spotify.com"].includes(url.hostname)) {
-    const result = await spotifyMetadata(url.href);
+  const provider = providerFor(url);
+  // Spotify, Apple Music, and Amazon Music publish names, not audio. Each
+  // track carries a signed ticket the browser redeems for a YouTube match.
+  const metadata =
+    provider === "Spotify"
+      ? spotifyMetadata
+      : provider === "Apple Music"
+        ? appleMusicMetadata
+        : provider === "Amazon Music"
+          ? amazonMusicMetadata
+          : undefined;
+  if (metadata) {
+    const result = await metadata(url.href);
     return {
       ...result,
       tracks: result.tracks.map((track) => ({
         ...track,
-        matchTicket: signTicket({ kind: "match", ...track }),
+        matchTicket: signTicket({ kind: "match", ...track, origin: provider }),
       })),
     };
   }
@@ -161,7 +238,7 @@ export async function resolveCatalog(value: string, signal?: AbortSignal) {
     };
   if (info.entries.length > MAX_TRACKS)
     throw new HttpError(422, `Import up to ${MAX_TRACKS} tracks at a time.`);
-  const bandcamp = providerFor(url) === "Bandcamp";
+  const bandcamp = provider === "Bandcamp";
   // Bandcamp album listings omit artists. Compilations title tracks
   // "Artist - Title"; otherwise the album's account is the artist.
   const albumArtist = bandcamp
@@ -336,4 +413,27 @@ async function matchQuery(
     },
     link(best.x)!,
   );
+}
+// Search results list uploads that are already downloadable, so the feed
+// shows them with the same audio tickets an imported link would carry.
+export function searchResults(
+  entries: Extracted[],
+  youtube: boolean,
+  limit: number,
+): CatalogTrack[] {
+  const tracks: CatalogTrack[] = [];
+  for (const entry of entries) {
+    if (tracks.length >= limit) break;
+    const source = youtube
+      ? /^[a-zA-Z0-9_-]{11}$/.test(entry.id || "")
+        ? `https://www.youtube.com/watch?v=${entry.id}`
+        : ""
+      : (entry.webpage_url || entry.url || "").match(
+          /^https:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/?#]+\/[^/?#]+$/,
+        )?.[0] || "";
+    if (!source || entry.is_live || !entry.title) continue;
+    const track = catalogTrack(entry, source);
+    if (track.mediaUrl || track.matchTicket) tracks.push(track);
+  }
+  return tracks;
 }

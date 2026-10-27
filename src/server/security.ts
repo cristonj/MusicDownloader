@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isMediaHost, providerFor } from "@/lib/model";
+import { AMAZON_MUSIC_HOSTS, isMediaHost, providerFor } from "@/lib/model";
 export class HttpError extends Error {
   constructor(
     public status: number,
@@ -75,6 +75,13 @@ export function allowedSource(value: string): URL {
     provider === "YouTube" ||
     (provider === "Spotify" &&
       ["open.spotify.com", "spotify.link"].includes(url.hostname)) ||
+    (provider === "Apple Music" &&
+      ["music.apple.com", "geo.music.apple.com"].includes(url.hostname)) ||
+    (provider === "Amazon Music" &&
+      AMAZON_MUSIC_HOSTS.includes(url.hostname)) ||
+    // TikTok posts are videos; their audio is extracted like any other.
+    (provider === "TikTok" &&
+      /^(?:www\.|m\.|vm\.|vt\.)?tiktok\.com$/.test(url.hostname)) ||
     (provider === "Bandcamp" &&
       /^(?:[a-z0-9-]+\.)?bandcamp\.com$/.test(url.hostname)) ||
     (provider === "SoundCloud" &&
@@ -91,12 +98,18 @@ export function allowedSource(value: string): URL {
   )
     throw new HttpError(
       400,
-      "Use a YouTube, Spotify, SoundCloud, or Bandcamp link.",
+      "Use a YouTube, Spotify, Apple Music, Amazon Music, TikTok, SoundCloud, or Bandcamp link.",
     );
   // Music share links identify the same recordings as regular YouTube.
   // Use one extraction/cache path without the share-specific tracking token.
   if (provider === "YouTube") {
     if (url.hostname === "music.youtube.com") url.hostname = "www.youtube.com";
+    // A Short is an ordinary recording under a different path.
+    const short = url.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]{11})\/?$/);
+    if (short) {
+      url.pathname = "/watch";
+      url.searchParams.set("v", short[1]);
+    }
     url.searchParams.delete("si");
   }
   return url;

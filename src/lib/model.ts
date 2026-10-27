@@ -3,6 +3,9 @@ export type Provider =
   | "SoundCloud"
   | "Bandcamp"
   | "Spotify"
+  | "Apple Music"
+  | "Amazon Music"
+  | "TikTok"
   | "Direct link"
   | "Local file";
 export type Format =
@@ -26,6 +29,7 @@ export interface Track {
   artist: string;
   provider: Provider;
   duration?: number;
+  artwork?: string;
   file?: File;
   mediaUrl?: string;
   transport?: "helper";
@@ -46,12 +50,18 @@ export interface Track {
 }
 export interface Preferences {
   format: Format;
+  // Shows the services' own charts and searches side by side.
+  feed: boolean;
+  // Services the listener has hidden from that view.
+  feedHidden: Provider[];
   bitrate: "128" | "192" | "256" | "320";
   sampleRate: "source" | "44100" | "48000" | "96000";
   bitDepth: "16" | "24";
 }
 export const defaults: Preferences = {
   format: "original",
+  feed: false,
+  feedHidden: [],
   bitrate: "320",
   sampleRate: "source",
   bitDepth: "16",
@@ -82,10 +92,63 @@ export const MEDIA_HOSTS = [
   "bcbits.com",
   "bandcamp.com",
 ];
+// Cover art is loaded straight from the services' image CDNs, which carry no
+// audio and are never used as a download source.
+export const ARTWORK_HOSTS = [
+  "ytimg.com",
+  "sndcdn.com",
+  "mzstatic.com",
+  "scdn.co",
+  "tiktokcdn.com",
+  "tiktokcdn-us.com",
+];
+export const isArtworkUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      ARTWORK_HOSTS.some(
+        (host) => url.hostname === host || url.hostname.endsWith(`.${host}`),
+      )
+    );
+  } catch {
+    return false;
+  }
+};
 export const isMediaHost = (hostname: string) =>
   MEDIA_HOSTS.some(
     (host) => hostname === host || hostname.endsWith(`.${host}`),
   );
+
+// Services that publish track names but no downloadable audio. Their tracks
+// are matched to uploads on YouTube or SoundCloud instead.
+export const MATCH_PROVIDERS: Provider[] = [
+  "Spotify",
+  "Apple Music",
+  "Amazon Music",
+];
+export const isMatchProvider = (provider: Provider) =>
+  MATCH_PROVIDERS.includes(provider);
+// Amazon Music uses one host per storefront.
+export const AMAZON_MUSIC_HOSTS = [
+  "com",
+  "co.uk",
+  "de",
+  "fr",
+  "it",
+  "es",
+  "nl",
+  "se",
+  "pl",
+  "ca",
+  "com.au",
+  "com.br",
+  "com.mx",
+  "co.jp",
+  "in",
+].map((suffix) => `music.amazon.${suffix}`);
 
 export function parseUrl(input: string): URL {
   let url: URL;
@@ -119,6 +182,10 @@ export function providerFor(url: URL): Provider {
   if (host === "bandcamp.com" || host.endsWith(".bandcamp.com"))
     return "Bandcamp";
   if (host === "open.spotify.com" || host === "spotify.link") return "Spotify";
+  if (host === "tiktok.com" || host.endsWith(".tiktok.com")) return "TikTok";
+  if (["music.apple.com", "geo.music.apple.com"].includes(host))
+    return "Apple Music";
+  if (AMAZON_MUSIC_HOSTS.includes(host)) return "Amazon Music";
   return "Direct link";
 }
 export function safeFilename(name: string): string {
@@ -220,6 +287,16 @@ export function readPreferences(value: string | null): Preferences {
       format: formats.some((f) => f.value === p.format)
         ? p.format
         : defaults.format,
+      feed: typeof p.feed === "boolean" ? p.feed : defaults.feed,
+      feedHidden: Array.isArray(p.feedHidden)
+        ? p.feedHidden.filter(
+            (value: unknown): value is Provider =>
+              typeof value === "string" &&
+              ["YouTube", "Spotify", "Apple Music", "SoundCloud"].includes(
+                value,
+              ),
+          )
+        : defaults.feedHidden,
       bitrate: ["128", "192", "256", "320"].includes(p.bitrate)
         ? p.bitrate
         : defaults.bitrate,

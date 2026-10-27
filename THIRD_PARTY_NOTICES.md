@@ -13,4 +13,9 @@ MusicDownloader uses these third-party projects. Their own copyright and license
 
 - [Node.js](https://github.com/nodejs/node/blob/main/LICENSE) is included in the desktop helper and retains its third-party terms. [@yao-pkg/pkg](https://github.com/yao-pkg/pkg) and [esbuild](https://github.com/evanw/esbuild) provide packaging (MIT). The helper embeds the standalone yt-dlp release; its bundled dependency terms also apply. Helper source and build scripts are included in this repository.
 
+Public metadata services used without an API key:
+
+- [iTunes Search API](https://performance-partners.apple.com/search-api): Apple's public catalogue, for Apple Music song, album, and playlist details.
+- [MusicBrainz](https://musicbrainz.org/doc/MusicBrainz_API): community music database under its [licences](https://musicbrainz.org/doc/About/Data_License), for Amazon Music links by ASIN. Requests identify this app and retry when the service reports it is busy.
+
 Service names and logos identify compatible link sources; MusicDownloader is not affiliated with those services.

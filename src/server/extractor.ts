@@ -23,6 +23,8 @@ export interface Extracted {
   fragments?: { url?: string; path?: string; range?: string }[];
   fragment_base_url?: string;
   http_headers?: Record<string, string>;
+  thumbnail?: string;
+  thumbnails?: { url?: string; width?: number; height?: number }[];
   entries?: Extracted[];
   formats?: unknown[];
   filesize?: number;

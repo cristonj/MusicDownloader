@@ -9,6 +9,53 @@
   --sidebar: #fbfcf9;
   --red: #b44c3b;
 }
+/* Each service's own colour, read by chips, feed headers, and track rows. */
+.provider-youtube {
+  --brand: #ff0000;
+}
+.provider-spotify {
+  --brand: #1db954;
+}
+.provider-apple-music {
+  --brand: #fa243c;
+}
+.provider-amazon-music {
+  --brand: #00a8e1;
+}
+.provider-soundcloud {
+  --brand: #ff5500;
+}
+.provider-bandcamp {
+  --brand: #1da0c3;
+}
+.provider-mark {
+  display: inline-flex;
+  align-items: center;
+  color: var(--brand, currentColor);
+}
+/* Scrollbars, themed to match the surfaces they sit on. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c4cfb2 transparent;
+}
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c4cfb2;
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a9b893;
+  background-clip: content-box;
+}
 * {
   box-sizing: border-box;
 }
@@ -254,9 +301,9 @@ h1 > span {
 }
 .service-chip:hover,
 .service-chip.chosen {
-  background: #f2f5eb;
-  color: #4f6440;
-  border-color: #e6ebdb;
+  background: color-mix(in srgb, var(--brand, #52743a) 9%, #fff);
+  color: color-mix(in srgb, var(--brand, #52743a) 65%, #2f3a28);
+  border-color: color-mix(in srgb, var(--brand, #52743a) 25%, #fff);
 }
 .import-divider {
   display: flex;
@@ -492,6 +539,22 @@ input[type="checkbox"]:checked {
   position: relative;
   overflow: hidden;
 }
+/* A track that came with cover art shows it behind the play control. */
+.track-art img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.track-art:has(img) {
+  color: #fff;
+  text-shadow: 0 1px 6px #0007;
+}
+.track-art:has(img) > svg {
+  position: relative;
+  filter: drop-shadow(0 1px 5px #0009);
+}
 .track-art:after {
   content: "";
   position: absolute;
@@ -601,6 +664,24 @@ input[type="checkbox"]:checked {
 .match-source:hover {
   text-decoration: underline;
 }
+.match-source.match-sure {
+  color: #5c7a46;
+}
+.match-source.match-fair {
+  color: #9a7126;
+}
+.match-source.match-weak {
+  color: #a8503c;
+}
+.match-source.match-fair:before,
+.match-source.match-weak:before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
 .match-reason {
   font-size: 9px;
   color: #93a07f;
@@ -645,15 +726,22 @@ input[type="checkbox"]:checked {
   height: 100%;
   transition: width 0.2s;
 }
+/* The download bar follows the list instead of sitting under it. */
 .export-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #edf1e6;
+  background: #edf1e6cc;
+  backdrop-filter: blur(9px);
+  border: 1px solid #dfe6d2;
   padding: 16px 17px;
-  border-radius: 9px;
+  border-radius: 12px;
   margin-top: 18px;
   gap: 12px;
+  position: sticky;
+  bottom: 14px;
+  z-index: 8;
+  box-shadow: 0 10px 28px #2a3a1a1f;
 }
 .export-summary {
   display: flex;
@@ -1890,4 +1978,481 @@ input[type="checkbox"]:checked {
   color: #80946a;
   font-size: 12px;
   line-height: 1.7;
+}
+
+/* Discover feed: one card per service, side by side on a desktop width. */
+.wide-shell .topbar,
+.wide-shell main {
+  max-width: 1340px;
+}
+.wide-shell main {
+  padding-left: 44px;
+  padding-right: 44px;
+}
+.feed {
+  margin-top: 16px;
+}
+.feed-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 0 2px 14px;
+}
+.feed-title h2 {
+  font-family: "Manrope Variable", Arial, sans-serif;
+  font-size: 23px;
+  font-weight: 650;
+  letter-spacing: -0.6px;
+  margin: 0;
+}
+.feed-title p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.feed-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 7px 7px 7px 13px;
+  color: #9ba592;
+  box-shadow: 0 2px 10px #30431a06;
+}
+.feed-search:focus-within {
+  border-color: #c9d6ad;
+  box-shadow: 0 0 0 3px #d5f87240;
+}
+.feed-search input {
+  border: 0;
+  background: transparent;
+  width: 236px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.feed-search input::placeholder {
+  color: #a9b29f;
+}
+.feed-clear {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #93a089;
+  padding: 4px;
+  border-radius: 7px;
+}
+.feed-clear:hover {
+  background: #eef2e6;
+  color: #5d6f4c;
+}
+.feed-go {
+  border: 0;
+  background: var(--lime);
+  color: #38461f;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 9px;
+}
+.feed-go:hover {
+  background: #cbf25c;
+}
+.feed-filters {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 0 2px 14px;
+}
+.feed-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 99px;
+  padding: 6px 13px 6px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #55624a;
+}
+.feed-pill .feed-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand, var(--green));
+}
+.feed-pill:hover {
+  border-color: color-mix(in srgb, var(--brand, #52743a) 35%, #fff);
+}
+.feed-pill.off {
+  color: #a7b09c;
+  background: transparent;
+  border-style: dashed;
+}
+.feed-pill.off .feed-dot {
+  background: #ccd4c1;
+}
+.feed-back {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 99px;
+  padding: 6px 14px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #55624a;
+}
+.feed-back:hover {
+  background: #f2f5eb;
+}
+.feed-grid {
+  display: grid;
+  /* Wide enough that a song's name fits on the two lines it has. */
+  grid-template-columns: repeat(auto-fit, minmax(372px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.feed-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 4px 13px #30431a05;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* Every service gets the same frame, whatever its list looks like. */
+  height: 616px;
+}
+.feed-card > header,
+.feed-skeletons,
+.feed-message {
+  flex-shrink: 0;
+}
+.feed-card > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 13px 12px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--brand, #52743a) 5%, #fff),
+    var(--surface)
+  );
+}
+.feed-card-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+.feed-card-title strong {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+}
+.feed-card-title small {
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.feed-card-actions {
+  display: flex;
+  gap: 2px;
+}
+.feed-card-actions button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: #a4ad99;
+  border-radius: 8px;
+}
+.feed-card-actions button:hover {
+  background: #eff3e8;
+  color: #4f6440;
+}
+.feed-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--brand, #52743a) 12%, #fff);
+}
+.feed-card ol {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-gutter: stable;
+}
+.feed-card li {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 7px 7px 4px;
+  border-radius: 11px;
+  min-width: 0;
+}
+.feed-card li:hover {
+  background: #f5f8ef;
+}
+.feed-rank {
+  font-size: 10px;
+  color: #b5bdaa;
+  width: 17px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.feed-art {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #eef1e8;
+  border: 1px solid #0000000d;
+}
+/* Spotify's public chart publishes no per-track art, so its rows carry a
+   tile in the service's own colour rather than an empty frame. */
+.feed-art-blank {
+  display: grid;
+  place-items: center;
+  font-family: "Manrope Variable", Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 650;
+  color: #fff;
+  background: linear-gradient(
+    140deg,
+    color-mix(in srgb, var(--brand, #52743a) 85%, #fff),
+    color-mix(in srgb, var(--brand, #52743a) 55%, #2f3a28)
+  );
+  border: 0;
+}
+.feed-names {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.feed-names strong {
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.34;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.feed-names small {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* One service in full has the room for every name, whole. */
+.feed-focused .feed-names strong {
+  display: block;
+  overflow: visible;
+  font-size: 13px;
+}
+.feed-focused .feed-names small {
+  white-space: normal;
+}
+.feed-time {
+  font-size: 11px;
+  color: #aab394;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.feed-add {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: #5d6f4c;
+  border-radius: 9px;
+}
+.feed-add:hover:not(:disabled) {
+  background: var(--lime);
+  border-color: var(--lime);
+  color: #38461f;
+}
+.feed-add.done {
+  background: #eef5e0;
+  border-color: #e0ead0;
+  color: #76895f;
+  opacity: 1;
+}
+.feed-message {
+  padding: 15px 15px 17px;
+  background: #fdfaf6;
+}
+.feed-message p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #8e7a6e;
+}
+.feed-message button {
+  margin-top: 11px;
+  border: 1px solid #ece2d6;
+  background: var(--surface);
+  color: #7d6a5c;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+.feed-message button:hover {
+  background: #f7f1e9;
+}
+/* A service with nothing to list takes only the room it needs. */
+.feed-card-short {
+  height: auto;
+}
+.feed-skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 13px;
+}
+.feed-skeletons span {
+  height: 42px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #f2f4ed 25%, #e9ede1 50%, #f2f4ed 75%);
+  background-size: 300% 100%;
+  animation: feed-shimmer 1.4s linear infinite;
+}
+@keyframes feed-shimmer {
+  to {
+    background-position: -300% 0;
+  }
+}
+.helper-source {
+  display: block;
+  margin-top: 9px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.helper-source a {
+  color: #5d7246;
+  font-weight: 600;
+  text-decoration: underline;
+}
+.feed-hidden {
+  padding: 13px 2px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.feed-hidden button {
+  border: 0;
+  background: transparent;
+  color: #5d7246;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: underline;
+  padding: 0;
+}
+/* One service in full: the same rows, more of them, across the width. */
+.feed-focused .feed-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.feed-focused .feed-card {
+  height: auto;
+  max-height: none;
+}
+.feed-focused .feed-card ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 2px 20px;
+  padding: 10px;
+  overflow: visible;
+}
+.feed-focused .feed-art {
+  width: 52px;
+  height: 52px;
+}
+.settings-toggle {
+  appearance: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 99px;
+  background: #e2e7d8;
+  border: 1px solid var(--line);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.18s;
+  flex-shrink: 0;
+}
+.settings-toggle:after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 99px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px #2432161f;
+  transition: transform 0.18s;
+}
+.settings-toggle:checked {
+  background: var(--green);
+  border-color: var(--green);
+}
+.settings-toggle:checked:after {
+  transform: translateX(18px);
+}
+.settings-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+@media (max-width: 760px) {
+  .feed-card {
+    height: 520px;
+  }
+  .feed-head {
+    align-items: stretch;
+  }
+  .feed-search {
+    width: 100%;
+  }
+  .feed-search input {
+    width: 100%;
+    min-width: 0;
+  }
+  .feed-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .feed-focused .feed-card ol {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

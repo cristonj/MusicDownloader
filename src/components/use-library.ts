@@ -3,15 +3,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bytesLabel,
   defaults,
+  isMatchProvider,
   MAX_BATCH_BYTES,
   MAX_TRACKS,
   outputFilename,
   readPreferences,
   safeFilename,
   type Preferences,
+  type Provider,
   type Track,
 } from "@/lib/model";
 import { fetchAudio, localTrack, resolveLink } from "@/lib/sources";
+import { importRow, type FeedRow } from "@/lib/feed";
 import {
   consumeHelperPair,
   helperConnection,
@@ -52,6 +55,7 @@ export function useLibrary() {
   const running = useRef(false);
   const abort = useRef<AbortController | null>(null);
   const resolveAbort = useRef<AbortController | null>(null);
+  const feedAbort = useRef(new Set<AbortController>());
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   current.current = tracks;
 
@@ -152,6 +156,29 @@ export function useLibrary() {
     if (errors.length) notify(errors[0], "error");
     else if (accepted.length) setNotice(null);
   };
+  // A feed row is added one track at a time, so the chart stays browsable
+  // while a match runs for the row the listener picked.
+  const addFeedRow = async (entry: FeedRow, provider: Provider) => {
+    if (running.current) return false;
+    if (current.current.length >= MAX_TRACKS) {
+      notify(`Keep your collection under ${MAX_TRACKS} tracks.`, "error");
+      return false;
+    }
+    const controller = new AbortController();
+    feedAbort.current.add(controller);
+    try {
+      const track = await importRow(entry, provider, controller.signal);
+      setTracks((items) => [...items, track]);
+      if (track.error) notify(track.error, "error");
+      else setNotice(null);
+      return !track.error;
+    } catch (error) {
+      if (!controller.signal.aborted) notify((error as Error).message, "error");
+      return false;
+    } finally {
+      feedAbort.current.delete(controller);
+    }
+  };
   const addLink = async (link: string) => {
     if (resolveAbort.current || running.current || !link.trim()) return false;
     const controller = new AbortController();
@@ -172,10 +199,13 @@ export function useLibrary() {
       setTracks((items) => [...items, ...result.tracks]);
       setCollection(result.title);
       if (result.notice) notify(result.notice, "error");
-      else if (result.tracks.some((t) => t.provider === "Spotify"))
-        notify(
-          "Spotify imported. Confident matches are selected; review the rest before downloading.",
-        );
+      else {
+        const matched = result.tracks.find((t) => isMatchProvider(t.provider));
+        if (matched)
+          notify(
+            `${matched.provider} imported and selected. Flagged matches are worth a listen before downloading.`,
+          );
+      }
       return true;
     } catch (error) {
       if (error instanceof HelperRequiredError) setHelperOpen(true);
@@ -195,6 +225,7 @@ export function useLibrary() {
   const cancel = () => {
     abort.current?.abort();
     resolveAbort.current?.abort();
+    for (const controller of feedAbort.current) controller.abort();
     cancelConversion();
   };
   const download = async (ids: string[], zip: boolean) => {
@@ -406,6 +437,7 @@ export function useLibrary() {
     changePrefs,
     addFiles,
     addLink,
+    addFeedRow,
     cancel,
     download,
     select: (id: string) => {

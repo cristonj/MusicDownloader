@@ -8,6 +8,6 @@ export async function GET(){
       const release=response.ok?await response.json():null;
       cached={expires:Date.now()+15000,assets:(release?.assets||[]).filter((asset:{state:string;size:number})=>asset.state==='uploaded'&&asset.size>0).map((asset:{name:string})=>asset.name)};
     }
-    return Response.json({windows:cached.assets.includes('MusicDownloader-Helper-Windows.exe'),mac:cached.assets.includes('MusicDownloader-Helper-Mac.zip'),linux:cached.assets.includes('MusicDownloader-Helper-Linux.tar.gz')},{headers:{'Cache-Control':'public, max-age=10'}});
+    return Response.json({windows:cached.assets.includes('MusicDownloader-Helper-Windows-Setup.exe'),windowsPortable:cached.assets.includes('MusicDownloader-Helper-Windows.exe'),mac:cached.assets.includes('MusicDownloader-Helper-Mac.zip'),linux:cached.assets.includes('MusicDownloader-Helper-Linux.tar.gz')},{headers:{'Cache-Control':'public, max-age=10'}});
   }catch{return Response.json({windows:false,mac:false,linux:false},{headers:{'Cache-Control':'no-store'}});}
 }

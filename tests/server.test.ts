@@ -7,12 +7,14 @@ import {
   readTicket,
   signTicket,
 } from "../src/server/security";
-import { matchScore, matchTrack } from "../src/server/catalog";
+import { matchScore, matchTrack, songName } from "../src/server/catalog";
+import { providerFor } from "../src/lib/model";
 import { CHUNK_BYTES, hlsManifest, mediaChunk } from "../src/server/media";
-import { mediaFetch } from "../src/server/upstream";
+import { mediaFetch, publicFetch } from "../src/server/upstream";
 import { extract } from "../src/server/extractor";
 import { POST as resolve } from "../src/app/api/resolve/route";
 import { POST as lookup } from "../src/app/api/lookup/route";
+import { POST as feed } from "../src/app/api/feed/route";
 import { GET as audio } from "../src/app/api/audio/route";
 import { GET as media } from "../src/app/api/media/route";
 vi.mock("../src/server/upstream", () => ({
@@ -450,6 +452,454 @@ describe("private server endpoints", () => {
   });
 });
 
+describe("metadata-only services", () => {
+  const importLink = async (url: string) =>
+    resolve(
+      new Request("http://localhost/api/resolve", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      }),
+    );
+  const json = (value: unknown) => new Response(JSON.stringify(value));
+  it("accepts Apple Music and Amazon Music links by host, not by lookalike", () => {
+    expect(
+      allowedSource("https://music.apple.com/us/album/dreams/1440857781")
+        .hostname,
+    ).toBe("music.apple.com");
+    expect(
+      allowedSource("https://music.amazon.co.uk/albums/B0CH3YL376").hostname,
+    ).toBe("music.amazon.co.uk");
+    for (const url of [
+      "https://music.apple.com.attacker.test/us/album/x/1",
+      "https://apple.com/us/album/x/1",
+      "https://music.amazon.attacker.test/albums/B0CH3YL376",
+      "http://music.apple.com/us/album/x/1",
+    ])
+      expect(() => allowedSource(url)).toThrow();
+  });
+  it("reads an Apple Music album from the public iTunes catalogue", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) => {
+      expect(url).toContain("itunes.apple.com/lookup");
+      expect(url).toContain("id=1440857781");
+      expect(url).toContain("entity=song");
+      expect(url).toContain("country=gb");
+      return json({
+        results: [
+          {
+            wrapperType: "collection",
+            collectionName: "In Between Dreams",
+          },
+          {
+            wrapperType: "track",
+            kind: "song",
+            trackName: "Better Together",
+            artistName: "Jack Johnson",
+            trackTimeMillis: 207679,
+          },
+          {
+            wrapperType: "track",
+            kind: "music-video",
+            trackName: "Better Together (Video)",
+            artistName: "Jack Johnson",
+          },
+        ],
+      });
+    });
+    const result = await (
+      await importLink(
+        "https://music.apple.com/gb/album/in-between-dreams/1440857781",
+      )
+    ).json();
+    expect(result.title).toBe("In Between Dreams");
+    // Videos are not songs, and metadata carries names, never audio.
+    expect(result.tracks).toHaveLength(1);
+    expect(result.tracks[0]).toMatchObject({
+      title: "Better Together",
+      artist: "Jack Johnson",
+      duration: 207.679,
+    });
+    expect(result.tracks[0].mediaUrl).toBeUndefined();
+    // The YouTube match reports which service asked for it.
+    expect(readTicket(result.tracks[0].matchTicket, "match").origin).toBe(
+      "Apple Music",
+    );
+  });
+  it("names the artist of every song in an Apple Music playlist", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) =>
+      url.includes("itunes.apple.com")
+        ? json({
+            results: [
+              {
+                wrapperType: "track",
+                kind: "song",
+                trackId: 6822497774,
+                trackName: "Housewife",
+                artistName: "Tate McRae",
+                trackTimeMillis: 208810,
+              },
+            ],
+          })
+        : new Response(
+            `<script type="application/ld+json">${JSON.stringify({
+              "@type": "MusicPlaylist",
+              name: "Today’s Hits",
+              author: { name: "Apple Music Hits" },
+              track: [
+                {
+                  name: "Housewife",
+                  url: "https://music.apple.com/us/song/housewife/6822497774",
+                  duration: "PT3M28S",
+                },
+                { name: "Uncatalogued", duration: "PT1H2M3S" },
+              ],
+            })}</script>`,
+          ),
+    );
+    const result = await (
+      await importLink(
+        "https://music.apple.com/us/playlist/todays-hits/pl.f4d106fed2bd41149aaacabb233eb5eb",
+      )
+    ).json();
+    expect(result.title).toBe("Today’s Hits");
+    expect(result.tracks[0]).toMatchObject({
+      title: "Housewife",
+      artist: "Tate McRae",
+      duration: 208.81,
+    });
+    // A song missing from the catalogue keeps its own title and length, and
+    // is never credited to the playlist's curator.
+    expect(result.tracks[1]).toMatchObject({
+      title: "Uncatalogued",
+      artist: "",
+      duration: 3723,
+    });
+  });
+  it("reads an Amazon Music album from the public music database", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) =>
+      url.includes("/url/?resource=")
+        ? json(
+            url.includes("music.amazon.com/albums/B0CH3YL376")
+              ? {
+                  relations: [
+                    {
+                      "target-type": "release",
+                      release: { id: "9c6bbc58", title: "Softly Spoken" },
+                    },
+                  ],
+                }
+              : { relations: [] },
+          )
+        : json({
+            title: "Softly Spoken",
+            "artist-credit": [{ name: "Glimlip" }],
+            media: [
+              {
+                tracks: [
+                  {
+                    title: "Softly Spoken",
+                    length: 138313,
+                    "artist-credit": [
+                      { name: "Glimlip", joinphrase: " & " },
+                      { name: "azayaka" },
+                    ],
+                  },
+                  { title: "Untitled credit", length: 90000 },
+                ],
+              },
+            ],
+          }),
+    );
+    const result = await (
+      await importLink("https://music.amazon.com/albums/B0CH3YL376")
+    ).json();
+    expect(result.title).toBe("Softly Spoken");
+    expect(result.tracks[0]).toMatchObject({
+      title: "Softly Spoken",
+      artist: "Glimlip & azayaka",
+      duration: 138.313,
+    });
+    // A track without its own credit is the album's artist.
+    expect(result.tracks[1].artist).toBe("Glimlip");
+    expect(readTicket(result.tracks[1].matchTicket, "match").origin).toBe(
+      "Amazon Music",
+    );
+  });
+  it("finds an album catalogued under its Amazon product link", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) =>
+      json(
+        // Only the product link is catalogued, in the form the database
+        // stores and looks up: /gp/product/, never /dp/.
+        url.includes("/gp/product/B0CH3YL378")
+          ? {
+              relations: [
+                {
+                  "target-type": "release",
+                  release: { id: "9c6bbc58", title: "A product album" },
+                },
+              ],
+            }
+          : url.includes("/url/?resource=")
+            ? { relations: [] }
+            : {
+                title: "A product album",
+                media: [{ tracks: [{ title: "Only track", length: 90000 }] }],
+              },
+      ),
+    );
+    const result = await (
+      await importLink("https://music.amazon.com/albums/B0CH3YL378")
+    ).json();
+    expect(result.title).toBe("A product album");
+    expect(result.tracks[0].title).toBe("Only track");
+  });
+  it("keeps a one-song Amazon Music link to that song", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) =>
+      json(
+        // The database lists the album but not the individual song.
+        url.includes("/albums/") || url.includes("/gp/product/")
+          ? {
+              relations: [
+                {
+                  "target-type": "release",
+                  release: { id: "9c6bbc58", title: "An album" },
+                },
+              ],
+            }
+          : { relations: [] },
+      ),
+    );
+    const response = await importLink(
+      "https://music.amazon.com/albums/B0CH3YL376?trackAsin=B0CH3YL999",
+    );
+    // The album is reachable, but one song was asked for.
+    expect(response.status).toBe(422);
+    expect((await response.json()).detail).toMatch(/without the song/);
+  });
+  it("spaces MusicBrainz requests even when imports overlap", async () => {
+    const calls: number[] = [];
+    vi.mocked(publicFetch).mockImplementation(async () => {
+      calls.push(Date.now());
+      return json({ relations: [] });
+    });
+    const start = Date.now();
+    await Promise.all([
+      importLink("https://music.amazon.com/albums/B0CH3YL371"),
+      importLink("https://music.amazon.com/albums/B0CH3YL372"),
+    ]);
+    // Four lookups, each claiming its own second rather than firing together.
+    expect(calls.length).toBe(4);
+    for (const [index, time] of calls.entries())
+      expect(time - start).toBeGreaterThanOrEqual(index * 1000 - 50);
+  });
+  it("says why an Amazon Music playlist cannot be imported", async () => {
+    const response = await importLink(
+      "https://music.amazon.com/playlists/B073H3G18R",
+    );
+    expect(response.status).toBe(422);
+    expect((await response.json()).detail).toMatch(/sign-in/);
+    expect(publicFetch).not.toHaveBeenCalled();
+  });
+  it("explains an Amazon Music album the public database does not list", async () => {
+    vi.mocked(publicFetch).mockResolvedValue(json({ relations: [] }));
+    const response = await importLink(
+      "https://music.amazon.com/albums/B0CH3YL377",
+    );
+    expect(response.status).toBe(422);
+    expect((await response.json()).detail).toMatch(/public music database/);
+  });
+});
+describe("short-form sources", () => {
+  it("opens a Short as the recording it is", () => {
+    const short = allowedSource(
+      "https://www.youtube.com/shorts/xKJtIjB3pAI?si=3ZN4Gzsw8cDL",
+    );
+    // One extraction path and one cache entry, whichever page it was on.
+    expect(short.href).toBe("https://www.youtube.com/watch?v=xKJtIjB3pAI");
+    // Anything that is not a video id is left for the extractor to reject,
+    // as any other YouTube path is.
+    expect(allowedSource("https://www.youtube.com/shorts/not-an-id").href).toBe(
+      "https://www.youtube.com/shorts/not-an-id",
+    );
+  });
+  it("accepts TikTok posts and rejects lookalikes", () => {
+    for (const url of [
+      "https://www.tiktok.com/@artist/video/7016181462140628225",
+      "https://vm.tiktok.com/ZGJabcdef/",
+      "https://tiktok.com/@artist/video/7016181462140628225",
+    ])
+      expect(providerFor(allowedSource(url))).toBe("TikTok");
+    for (const url of [
+      "https://tiktok.com.attacker.test/@artist/video/1",
+      "http://www.tiktok.com/@artist/video/1",
+    ])
+      expect(() => allowedSource(url)).toThrow();
+  });
+  it("sends an IP-blocked post to the listener's own connection", async () => {
+    const { extractionFailure } =
+      await import("../src/server/extraction-error");
+    const failure = extractionFailure(
+      "ERROR: [TikTok] 7016181462140628225: Your IP address is blocked from accessing this post",
+      false,
+    );
+    // The browser offers the desktop helper on exactly this wording.
+    expect(failure.message).toMatch(/blocking requests from this web server/);
+  });
+});
+describe("upload titles read as song names", () => {
+  it("drops format tags, credit chains, and the artist before the dash", () => {
+    const cases: [string, string, string, string][] = [
+      // [upload title, uploader, song, artist]
+      [
+        "Shakira, Burna Boy - Dai Dai (Official Video)",
+        "Shakira",
+        "Dai Dai",
+        "Shakira, Burna Boy",
+      ],
+      [
+        "KALYANI (with Shreya Ghoshal) OFFICIAL MUSIC VIDEO | ARJN | KDS | FIFTY4",
+        "MONEY VERSE RECORDS",
+        "KALYANI (with Shreya Ghoshal)",
+        "MONEY VERSE RECORDS",
+      ],
+      // What follows the dash is only a tag, so the name is what precedes it.
+      [
+        "Ala Bolelo – Lyric Video | Jailer 2 | Superstar Rajinikanth",
+        "Sun TV",
+        "Ala Bolelo",
+        "Sun TV",
+      ],
+      [
+        "A2O LITE 'NEON' Official Video",
+        "A2O WORLD",
+        "A2O LITE 'NEON'",
+        "A2O WORLD",
+      ],
+      [
+        "Olivia Rodrigo - expectations (feat. Chappell Roan) (Official Music Video)",
+        "Olivia Rodrigo",
+        "expectations (feat. Chappell Roan)",
+        "Olivia Rodrigo",
+      ],
+      // Names that are already names are left alone.
+      ["lofi hip hop radio", "ChilledCow", "lofi hip hop radio", "ChilledCow"],
+      // Short first segments are names, not credits.
+      ["Artist | Song", "Someone", "Artist | Song", "Someone"],
+      [
+        "Casa Tupka Anthemo | @YoYoHoneySingh | Full Video",
+        "Yo Yo Honey Singh",
+        "Casa Tupka Anthemo",
+        "Yo Yo Honey Singh",
+      ],
+    ];
+    for (const [title, uploader, song, artist] of cases)
+      expect(songName(title, uploader)).toEqual({ title: song, artist });
+  });
+});
+describe("service feeds", () => {
+  const ask = async (provider: string, query?: string) =>
+    feed(
+      new Request("http://localhost/api/feed", {
+        method: "POST",
+        body: JSON.stringify({ provider, query }),
+      }),
+    );
+  it("shows a service's own chart as importable rows", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      title: "Top 100 Songs Global",
+      entries: Array.from({ length: 30 }, (_, index) => ({
+        id: `video${String(index).padStart(6, "0")}`,
+        title: `Song ${index}`,
+        channel: "An artist",
+        duration: 200,
+      })),
+    });
+    const result = await (await ask("YouTube")).json();
+    expect(result.title).toBe("Top 100 Songs Global");
+    // One screenful, each row already carrying its audio ticket.
+    expect(result.tracks).toHaveLength(25);
+    expect(result.tracks[0]).toMatchObject({
+      title: "Song 0",
+      artist: "An artist",
+      mediaUrl: expect.stringMatching(/^\/api\/audio\?ticket=/),
+    });
+  });
+  it("searches the services that publish one and says who does not", async () => {
+    vi.mocked(publicFetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [
+            {
+              wrapperType: "track",
+              kind: "song",
+              trackName: "ocean eyes",
+              artistName: "Billie Eilish",
+              trackTimeMillis: 200000,
+            },
+          ],
+        }),
+      ),
+    );
+    const apple = await (await ask("Apple Music", "billie eilish")).json();
+    expect(apple.title).toBe("billie eilish");
+    expect(apple.tracks[0]).toMatchObject({
+      title: "ocean eyes",
+      artist: "Billie Eilish",
+    });
+    // Names, not audio: the match runs when the row is added.
+    expect(apple.tracks[0].mediaUrl).toBeUndefined();
+    expect(readTicket(apple.tracks[0].matchTicket, "match").origin).toBe(
+      "Apple Music",
+    );
+    const spotify = await ask("Spotify", "billie eilish");
+    expect(spotify.status).toBe(422);
+    expect((await spotify.json()).detail).toMatch(/needs an account/);
+  });
+  it("skips search results that are live or have no usable link", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      entries: [
+        { id: "liveliveliv", title: "Radio", is_live: true, duration: 0 },
+        { title: "No link here", duration: 100 },
+        {
+          webpage_url: "https://soundcloud.com/artist/track",
+          title: "A set track",
+          uploader: "Artist",
+          duration: 150,
+        },
+      ],
+    });
+    const result = await (await ask("SoundCloud", "lofi")).json();
+    expect(result.tracks).toHaveLength(1);
+    expect(result.tracks[0]).toMatchObject({
+      title: "A set track",
+      sourceUrl: "https://soundcloud.com/artist/track",
+    });
+  });
+  it("says which services publish no chart and which have no feed at all", async () => {
+    const soundcloud = await ask("SoundCloud");
+    expect(soundcloud.status).toBe(422);
+    expect((await soundcloud.json()).detail).toMatch(/no public chart/);
+    const amazon = await ask("Amazon Music", "anything");
+    expect(amazon.status).toBe(400);
+    expect(extract).not.toHaveBeenCalled();
+    expect(publicFetch).not.toHaveBeenCalled();
+  });
+  it("serves a repeated feed from memory instead of asking again", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      entries: [
+        {
+          id: "cachedvideo",
+          title: "Cached song",
+          channel: "An artist",
+          duration: 180,
+        },
+      ],
+    });
+    const first = await (await ask("YouTube", "a cached query")).json();
+    const again = await (await ask("YouTube", "a cached query")).json();
+    expect(again.tracks[0].title).toBe(first.tracks[0].title);
+    expect(extract).toHaveBeenCalledTimes(1);
+  });
+});
 describe("bounded audio transport", () => {
   const ticket = {
     kind: "media" as const,
