@@ -36,7 +36,9 @@ describe("browser/helper transport", () => {
       new Headers(request.mock.calls[0][1]?.headers).get("authorization"),
     ).toBe(`Bearer ${token}`);
   });
-  it("fetches audio directly in the browser when the CDN permits it", async () => {
+  // Most CDNs refuse cross-origin reads, and each refusal left a CORS error
+  // in the console, so audio always comes through the helper.
+  it("fetches audio through the helper, not straight from the CDN", async () => {
     connect();
     const request = vi.fn(async (url: string) =>
       url.includes("/api/audio")
@@ -46,7 +48,11 @@ describe("browser/helper transport", () => {
             browserUrl: "https://audio.bcbits.com/song.mp3",
           })
         : new Response(new Uint8Array([1, 2, 3]), {
-            headers: { "Content-Type": "audio/mpeg" },
+            status: 206,
+            headers: {
+              "Content-Type": "audio/mpeg",
+              "Content-Range": "bytes 0-2/3",
+            },
           }),
     );
     vi.stubGlobal("fetch", request);
@@ -67,7 +73,13 @@ describe("browser/helper transport", () => {
       () => {},
     );
     expect(result.blob.size).toBe(3);
-    expect(request.mock.calls[1][0]).toBe("https://audio.bcbits.com/song.mp3");
+    // An older helper may still offer a CDN link; it is not used.
+    expect(request.mock.calls.map(([url]) => url)).not.toContain(
+      "https://audio.bcbits.com/song.mp3",
+    );
+    expect(request.mock.calls[1][0]).toMatch(
+      /^http:\/\/127\.0\.0\.1:\d+\/api\/media/,
+    );
   });
   it("does not allow the helper transport to address arbitrary local paths", async () => {
     connect();

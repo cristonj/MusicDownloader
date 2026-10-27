@@ -143,7 +143,6 @@ export function startHelper(options: {
             ).searchParams.get("ticket");
             if (token) {
               const stream = readTicket(token, "media");
-              if (!stream.range) result.browserUrl = stream.url;
             }
           }
           res.end(JSON.stringify(result));

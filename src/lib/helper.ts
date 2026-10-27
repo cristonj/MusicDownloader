@@ -44,7 +44,7 @@ export async function helperFetch(
   if (!connection)
     throw new HelperRequiredError("Open the desktop helper to connect.");
   if (
-    !/^\/(?:api\/(?:resolve|match|lookup|audio|media)(?:\?|$)|health$|quit$)/.test(
+    !/^\/(?:api\/(?:resolve|match|lookup|feed|audio|media)(?:\?|$)|health$|quit$)/.test(
       path,
     )
   )

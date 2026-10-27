@@ -7,7 +7,6 @@ import {
   extensionFor,
   isArtworkUrl,
   isMatchProvider,
-  isMediaHost,
   MAX_FILE_BYTES,
   MAX_TRACKS,
   parseUrl,
@@ -429,21 +428,6 @@ async function fetchSourceAudio(
     !/^[a-z0-9]{1,5}$/.test(manifest.extension)
   )
     throw new Error("This source returned an invalid audio stream.");
-  if (track.transport === "helper" && typeof manifest.browserUrl === "string") {
-    const remote = parseUrl(manifest.browserUrl);
-    if (remote.protocol === "https:" && isMediaHost(remote.hostname)) {
-      try {
-        const direct = await fetchDirectAudio(
-          { ...track, mediaUrl: remote.href, extension: manifest.extension },
-          signal,
-          onProgress,
-        );
-        return { ...direct, remuxTo: manifest.remuxTo };
-      } catch (error) {
-        if (signal.aborted) throw error;
-      }
-    }
-  }
   const controller = new AbortController(),
     combined = AbortSignal.any([signal, controller.signal]);
   const chunkSize = 2 * 1024 * 1024;
