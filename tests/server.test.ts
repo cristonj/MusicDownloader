@@ -623,11 +623,39 @@ describe("metadata-only services", () => {
       "Amazon Music",
     );
   });
+  it("finds an album catalogued under its Amazon product link", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) =>
+      json(
+        // Only the product link is catalogued, in the form the database
+        // stores and looks up: /gp/product/, never /dp/.
+        url.includes("/gp/product/B0CH3YL378")
+          ? {
+              relations: [
+                {
+                  "target-type": "release",
+                  release: { id: "9c6bbc58", title: "A product album" },
+                },
+              ],
+            }
+          : url.includes("/url/?resource=")
+            ? { relations: [] }
+            : {
+                title: "A product album",
+                media: [{ tracks: [{ title: "Only track", length: 90000 }] }],
+              },
+      ),
+    );
+    const result = await (
+      await importLink("https://music.amazon.com/albums/B0CH3YL378")
+    ).json();
+    expect(result.title).toBe("A product album");
+    expect(result.tracks[0].title).toBe("Only track");
+  });
   it("keeps a one-song Amazon Music link to that song", async () => {
     vi.mocked(publicFetch).mockImplementation(async (url) =>
       json(
         // The database lists the album but not the individual song.
-        url.includes("/albums/") || url.includes("/dp/")
+        url.includes("/albums/") || url.includes("/gp/product/")
           ? {
               relations: [
                 {

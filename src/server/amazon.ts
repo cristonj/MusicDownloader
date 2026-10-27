@@ -90,10 +90,11 @@ const recordingTrack = (
 // catalogues those links publicly, which gives the names to match on YouTube.
 async function relationsFor(asin: string, kind: "release" | "recording") {
   // The database records the canonical Amazon Music link; the same ASIN also
-  // appears as an Amazon product link.
+  // appears as an Amazon product link, which it stores in the /gp/product/
+  // form and looks up verbatim, so the /dp/ form of the link never matches.
   const links = [
     `https://music.amazon.com/${kind === "release" ? "albums" : "tracks"}/${asin}`,
-    `https://www.amazon.com/dp/${asin}`,
+    `https://www.amazon.com/gp/product/${asin}`,
   ];
   for (const link of links) {
     const found = await musicbrainz<{ relations?: Relation[] }>(
