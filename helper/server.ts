@@ -6,6 +6,7 @@ import {
 import { timingSafeEqual } from "node:crypto";
 import { POST as resolve } from "../src/app/api/resolve/route";
 import { POST as match } from "../src/app/api/match/route";
+import { POST as feed } from "../src/app/api/feed/route";
 import { POST as lookup } from "../src/app/api/lookup/route";
 import { GET as audio } from "../src/app/api/audio/route";
 import { readTicket } from "../src/server/security";
@@ -23,6 +24,7 @@ export function startHelper(options: {
   const routes: Record<string, (request: Request) => Promise<Response>> = {
     "POST /api/resolve": resolve,
     "POST /api/match": match,
+    "POST /api/feed": feed,
     "POST /api/lookup": lookup,
     "GET /api/audio": audio,
     "GET /api/media": media,

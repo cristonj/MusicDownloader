@@ -13,6 +13,7 @@ import { mediaFetch, publicFetch } from "../src/server/upstream";
 import { extract } from "../src/server/extractor";
 import { POST as resolve } from "../src/app/api/resolve/route";
 import { POST as lookup } from "../src/app/api/lookup/route";
+import { POST as feed } from "../src/app/api/feed/route";
 import { GET as audio } from "../src/app/api/audio/route";
 import { GET as media } from "../src/app/api/media/route";
 vi.mock("../src/server/upstream", () => ({
@@ -636,6 +637,111 @@ describe("metadata-only services", () => {
     );
     expect(response.status).toBe(422);
     expect((await response.json()).detail).toMatch(/public music database/);
+  });
+});
+describe("service feeds", () => {
+  const ask = async (provider: string, query?: string) =>
+    feed(
+      new Request("http://localhost/api/feed", {
+        method: "POST",
+        body: JSON.stringify({ provider, query }),
+      }),
+    );
+  it("shows a service's own chart as importable rows", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      title: "Top 100 Songs Global",
+      entries: Array.from({ length: 30 }, (_, index) => ({
+        id: `video${String(index).padStart(6, "0")}`,
+        title: `Song ${index}`,
+        channel: "An artist",
+        duration: 200,
+      })),
+    });
+    const result = await (await ask("YouTube")).json();
+    expect(result.title).toBe("Top 100 Songs Global");
+    // One screenful, each row already carrying its audio ticket.
+    expect(result.tracks).toHaveLength(25);
+    expect(result.tracks[0]).toMatchObject({
+      title: "Song 0",
+      artist: "An artist",
+      mediaUrl: expect.stringMatching(/^\/api\/audio\?ticket=/),
+    });
+  });
+  it("searches the services that publish one and says who does not", async () => {
+    vi.mocked(publicFetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [
+            {
+              wrapperType: "track",
+              kind: "song",
+              trackName: "ocean eyes",
+              artistName: "Billie Eilish",
+              trackTimeMillis: 200000,
+            },
+          ],
+        }),
+      ),
+    );
+    const apple = await (await ask("Apple Music", "billie eilish")).json();
+    expect(apple.title).toBe("billie eilish");
+    expect(apple.tracks[0]).toMatchObject({
+      title: "ocean eyes",
+      artist: "Billie Eilish",
+    });
+    // Names, not audio: the match runs when the row is added.
+    expect(apple.tracks[0].mediaUrl).toBeUndefined();
+    expect(readTicket(apple.tracks[0].matchTicket, "match").origin).toBe(
+      "Apple Music",
+    );
+    const spotify = await ask("Spotify", "billie eilish");
+    expect(spotify.status).toBe(422);
+    expect((await spotify.json()).detail).toMatch(/needs an account/);
+  });
+  it("skips search results that are live or have no usable link", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      entries: [
+        { id: "liveliveliv", title: "Radio", is_live: true, duration: 0 },
+        { title: "No link here", duration: 100 },
+        {
+          webpage_url: "https://soundcloud.com/artist/track",
+          title: "A set track",
+          uploader: "Artist",
+          duration: 150,
+        },
+      ],
+    });
+    const result = await (await ask("SoundCloud", "lofi")).json();
+    expect(result.tracks).toHaveLength(1);
+    expect(result.tracks[0]).toMatchObject({
+      title: "A set track",
+      sourceUrl: "https://soundcloud.com/artist/track",
+    });
+  });
+  it("says which services publish no chart and which have no feed at all", async () => {
+    const soundcloud = await ask("SoundCloud");
+    expect(soundcloud.status).toBe(422);
+    expect((await soundcloud.json()).detail).toMatch(/no public chart/);
+    const amazon = await ask("Amazon Music", "anything");
+    expect(amazon.status).toBe(400);
+    expect(extract).not.toHaveBeenCalled();
+    expect(publicFetch).not.toHaveBeenCalled();
+  });
+  it("serves a repeated feed from memory instead of asking again", async () => {
+    vi.mocked(extract).mockResolvedValue({
+      entries: [
+        {
+          id: "cachedvideo",
+          title: "Cached song",
+          channel: "An artist",
+          duration: 180,
+        },
+      ],
+    });
+    const first = await (await ask("YouTube", "a cached query")).json();
+    const again = await (await ask("YouTube", "a cached query")).json();
+    expect(again.tracks[0].title).toBe(first.tracks[0].title);
+    expect(extract).toHaveBeenCalledTimes(1);
   });
 });
 describe("bounded audio transport", () => {

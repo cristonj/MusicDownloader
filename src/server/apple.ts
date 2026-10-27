@@ -144,6 +144,25 @@ async function playlistTracks(url: URL, country: string) {
     }),
   };
 }
+// The catalogue's own search, for the Apple Music column of the feed.
+export async function itunesSearch(
+  term: string,
+  limit: number,
+  country = "us",
+): Promise<MetadataTrack[]> {
+  const url = new URL("https://itunes.apple.com/search");
+  url.searchParams.set("term", term);
+  url.searchParams.set("entity", "song");
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("country", country);
+  const response = await appleFetch(url.href);
+  const data = (await response.json().catch(() => null)) as {
+    results?: ItunesResult[];
+  } | null;
+  if (!data || !Array.isArray(data.results))
+    throw new HttpError(422, "Apple Music could not run that search.");
+  return data.results.filter(isSong).map(songTrack);
+}
 export async function appleMusicMetadata(
   value: string,
 ): Promise<{ title: string; tracks: MetadataTrack[]; notice?: string }> {

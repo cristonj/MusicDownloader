@@ -48,12 +48,15 @@ export interface Track {
 }
 export interface Preferences {
   format: Format;
+  // Shows the services' own charts and searches side by side.
+  feed: boolean;
   bitrate: "128" | "192" | "256" | "320";
   sampleRate: "source" | "44100" | "48000" | "96000";
   bitDepth: "16" | "24";
 }
 export const defaults: Preferences = {
   format: "original",
+  feed: false,
   bitrate: "320",
   sampleRate: "source",
   bitDepth: "16",
@@ -253,6 +256,7 @@ export function readPreferences(value: string | null): Preferences {
       format: formats.some((f) => f.value === p.format)
         ? p.format
         : defaults.format,
+      feed: typeof p.feed === "boolean" ? p.feed : defaults.feed,
       bitrate: ["128", "192", "256", "320"].includes(p.bitrate)
         ? p.bitrate
         : defaults.bitrate,

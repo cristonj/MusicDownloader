@@ -32,6 +32,7 @@ import {
   type Track,
 } from "@/lib/model";
 import { fetchAudio } from "@/lib/sources";
+import Feed from "./feed";
 import HelperSetup from "./helper-setup";
 import { useLibrary } from "./use-library";
 
@@ -49,7 +50,24 @@ function Brand({ compact = false }: { compact?: boolean }) {
     </div>
   );
 }
+// The services' own colours, kept on one wrapper so chips, feed headers, and
+// track rows all mark a provider the same way.
 function ServiceIcon({
+  provider,
+  size = 16,
+}: {
+  provider: Provider;
+  size?: number;
+}) {
+  return (
+    <span
+      className={`provider-mark provider-${provider.toLowerCase().replace(/\s+/g, "-")}`}
+    >
+      <ServiceGlyph provider={provider} size={size} />
+    </span>
+  );
+}
+function ServiceGlyph({
   provider,
   size = 16,
 }: {
@@ -438,7 +456,7 @@ export default function Downloader() {
                 {providers.map((provider) => (
                   <button
                     key={provider}
-                    className={`service-chip ${activeProvider === provider ? "chosen" : ""}`}
+                    className={`service-chip provider-${provider.toLowerCase().replace(/\s+/g, "-")} ${activeProvider === provider ? "chosen" : ""}`}
                     onClick={() => {
                       setActiveProvider(
                         activeProvider === provider ? null : provider,
@@ -480,6 +498,14 @@ export default function Downloader() {
               }}
             />
           </section>
+
+          {prefs.feed && library.hydrated && (
+            <Feed
+              add={library.addFeedRow}
+              busy={locked}
+              icon={(provider) => <ServiceIcon provider={provider} size={15} />}
+            />
+          )}
 
           <section className="format-bar" aria-label="Export settings">
             <div className="format-controls">
@@ -967,6 +993,34 @@ export default function Downloader() {
                 <p className="modal-description">
                   Saved in this browser. No account needed.
                 </p>
+                <div className="settings-section">
+                  <h3>Discover</h3>
+                  <label className="settings-row">
+                    <span>
+                      Service feeds
+                      <small>
+                        Shows each service&apos;s own chart, and one search
+                        across all of them, under the link field.
+                      </small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      className="settings-toggle"
+                      aria-label="Show service feeds"
+                      checked={prefs.feed}
+                      disabled={locked}
+                      onChange={(event) =>
+                        library.changePrefs({ feed: event.target.checked })
+                      }
+                    />
+                  </label>
+                  <p className="settings-note">
+                    YouTube, Spotify, and Apple Music publish a chart anyone can
+                    read; YouTube, Apple Music, and SoundCloud also publish a
+                    search. Amazon Music and Bandcamp publish neither without an
+                    account, so they have no column.
+                  </p>
+                </div>
                 <div className="settings-section">
                   <h3>Audio</h3>
                   <label className="settings-row">

@@ -97,7 +97,7 @@ function searchNames(track: CatalogTrack) {
     duration: track.duration,
   };
 }
-function catalogTrack(
+export function catalogTrack(
   entry: Extracted,
   source: string,
   albumArtist = "",
@@ -349,4 +349,27 @@ async function matchQuery(
     },
     link(best.x)!,
   );
+}
+// Search results list uploads that are already downloadable, so the feed
+// shows them with the same audio tickets an imported link would carry.
+export function searchResults(
+  entries: Extracted[],
+  youtube: boolean,
+  limit: number,
+): CatalogTrack[] {
+  const tracks: CatalogTrack[] = [];
+  for (const entry of entries) {
+    if (tracks.length >= limit) break;
+    const source = youtube
+      ? /^[a-zA-Z0-9_-]{11}$/.test(entry.id || "")
+        ? `https://www.youtube.com/watch?v=${entry.id}`
+        : ""
+      : (entry.webpage_url || entry.url || "").match(
+          /^https:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/?#]+\/[^/?#]+$/,
+        )?.[0] || "";
+    if (!source || entry.is_live || !entry.title) continue;
+    const track = catalogTrack(entry, source);
+    if (track.mediaUrl || track.matchTicket) tracks.push(track);
+  }
+  return tracks;
 }
