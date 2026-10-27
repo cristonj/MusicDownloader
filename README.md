@@ -8,9 +8,9 @@ Open the web app and choose **Desktop helper** (the download icon). The wizard p
 
 The self-contained helper bundles Node and the verified standalone extraction tool. It opens the web app and pairs automatically with a short-lived, device-local authorization token. Keep it running while downloading; use **Quit helper** in the wizard to stop it. These builds are unsigned, so the operating system may require an explicit allow/open confirmation. New helper builds are published automatically at [Desktop helper releases](https://github.com/cristonj/MusicDownloader/releases/tag/helper-v1).
 
-When connected, **all source requests**—YouTube/YouTube Music, SoundCloud, Bandcamp, Spotify metadata, and Spotify-to-YouTube matching—run from the computer's network connection. Existing tracks imported through the hosted API are re-resolved locally before downloading. This removes dependence on Netlify's IP for those operations; it does not guarantee access to private, region-restricted, or otherwise unavailable tracks, or remove a provider block affecting the user's own connection.
+When connected, **all source requests**—YouTube/YouTube Music, SoundCloud, Bandcamp, Spotify/Apple Music/Amazon Music metadata, and their YouTube matching—run from the computer's network connection. Existing tracks imported through the hosted API are re-resolved locally before downloading. This removes dependence on Netlify's IP for those operations; it does not guarantee access to private, region-restricted, or otherwise unavailable tracks, or remove a provider block affecting the user's own connection.
 
-The browser first tries direct CDN transfers when permitted. Cross-origin or header restrictions fall back to the loopback helper. HLS/DASH assembly, audio conversion, and playlist ZIP creation stay in browser workers. Local files never go to the helper or web server. Spotify audio comes from the visible YouTube matches, not decrypted Spotify streams.
+The browser first tries direct CDN transfers when permitted. Cross-origin or header restrictions fall back to the loopback helper. HLS/DASH assembly, audio conversion, and playlist ZIP creation stay in browser workers. Local files never go to the helper or web server. Spotify, Apple Music, and Amazon Music audio comes from the visible YouTube matches, not from decrypted streams of those services.
 
 The helper listens only on `127.0.0.1`, validates the Host and exact web-app Origin, requires its random per-launch token, and uses signed, allowlisted source URLs. Pairing secrets travel in the browser fragment (not to Netlify), then move to origin-scoped local storage and are removed from the address bar. Other websites cannot use its local API. Modern browsers may require local network permission.
 
@@ -31,13 +31,15 @@ For Netlify, connect the repository and deploy. `netlify.toml` builds the comple
 
 - YouTube songs/playlists, SoundCloud tracks/sets, and public Bandcamp tracks/albums use the connected desktop helper, or the hosted API when no helper is connected.
 - Spotify public songs, albums, and playlists import metadata without an API key, then match to YouTube recordings. Each match names the YouTube upload and channel it came from and why it was chosen. Only official uploads (artist channel, "- Topic", VEVO) with the same length are auto-selected; fan uploads are labelled and left for review. Spotify's public view lists at most 100 tracks of a playlist, and the app says so when it applies. Unmatched entries stay visible; private/unavailable tracks are not silently replaced.
+- Apple Music songs, albums, and public playlists import the same way. Songs and albums read the public iTunes catalogue (no API key); playlists read the public playlist page's schema.org track list and then name each song's artist and length from that catalogue. Albums import up to 200 tracks, which is the catalogue's own page size.
+- Amazon Music songs and albums import by the ASIN in the link, which is looked up in the public MusicBrainz database. Amazon Music publishes no public track list of its own, so a release nobody has catalogued there cannot be imported, and the app says so. Amazon Music playlists stay behind its sign-in and are not supported; import their albums or songs instead.
 - Local files stay on the device. Direct audio URLs also work when their server permits browser access.
 - Original, MP3, AAC/M4A, FLAC, WAV, OGG/Vorbis, Opus, and AIFF. Lossy bitrate, lossless bit depth, and sample rate where supported. Increasing output settings cannot recover detail missing from the source.
 - Select several tracks for a ZIP. Conversion and ZIP creation use browser workers. No accounts, database, analytics, or uploaded local files.
 
 ## How the server works
 
-`/api/resolve` reads a public track list. Spotify matches use bounded parallel `/api/match` requests. `/api/audio` opens a selected source only when requested; `/api/media` transfers signed, allowlisted CDN audio in chunks of at most 2 MiB. This keeps every response below Netlify's [function payload limits](https://docs.netlify.com/build/functions/configuration/). No audio files or jobs are persisted on the server.
+`/api/resolve` reads a public track list. Spotify, Apple Music, and Amazon Music matches use bounded parallel `/api/match` requests. `/api/audio` opens a selected source only when requested; `/api/media` transfers signed, allowlisted CDN audio in chunks of at most 2 MiB. This keeps every response below Netlify's [function payload limits](https://docs.netlify.com/build/functions/configuration/). No audio files or jobs are persisted on the server.
 
 Progressive audio is passed through. Unencrypted on-demand HLS audio is assembled in the browser and remuxed without re-encoding for Original exports. Source access still happens on the web server when necessary; conversion and playlist ZIPs stay on the device. FFmpeg WebAssembly (~31 MB) loads only when conversion/remuxing is needed.
 
@@ -45,7 +47,7 @@ The build downloads a pinned standalone yt-dlp release, verifies its SHA-256 aga
 
 Each server invocation has a bounded timeout. Public source URLs and CDN hosts are allowlisted; generic yt-dlp extraction is disabled. Media tickets expire after one hour, cross-origin requests are rejected, transfers are bounded, and local inputs never go to these endpoints. Serverless in-memory rate limits are a small additional guard, not an authentication system.
 
-Availability, region restrictions, anti-bot checks, and upstream metadata/extractor changes can still prevent individual downloads. Encrypted/live streams and private or paid-only files require your originals. Spotify metadata embeds may be unavailable or incomplete; use a smaller public playlist when the source does not expose the full list. There is no claim to download or decrypt Spotify streams.
+Availability, region restrictions, anti-bot checks, and upstream metadata/extractor changes can still prevent individual downloads. Encrypted/live streams and private or paid-only files require your originals. Spotify and Apple Music metadata may be unavailable or incomplete; use a smaller public playlist when the source does not expose the full list. There is no claim to download or decrypt Spotify, Apple Music, or Amazon Music streams.
 
 Browser limits: 150 MB per input, 450 MB retained collection. Playlists have no track cap; long ones show import progress. Phones may need smaller lossless batches. Tracks disappear on refresh; only audio preferences persist. Use music you own or have permission to download.
 

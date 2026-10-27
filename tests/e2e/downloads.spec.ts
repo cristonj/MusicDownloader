@@ -155,6 +155,47 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
   ).toBeEnabled();
 });
 
+test("Apple Music imports its track list and waits for review", async ({
+  page,
+}) => {
+  await page.route("**/api/resolve", (route) =>
+    route.fulfill({
+      json: {
+        title: "In Between Dreams",
+        tracks: [
+          {
+            title: "Better Together",
+            artist: "Jack Johnson",
+            duration: 207,
+            extension: "m4a",
+            mediaUrl: "/api/audio?ticket=signed",
+            sourceUrl: "https://www.youtube.com/watch?v=abcdefghijk",
+            matchedTitle: "Jack Johnson - Better Together",
+            matchConfidence: 0.7,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Apple Music" }).click();
+  await expect(page.getByLabel("Music or playlist link")).toHaveAttribute(
+    "placeholder",
+    /Apple Music song, album, or playlist/,
+  );
+  await page
+    .getByLabel("Music or playlist link")
+    .fill("https://music.apple.com/us/album/in-between-dreams/1440857781");
+  await page.getByRole("button", { name: "Add music link" }).click();
+  await expect(page.locator(".notice[role=status]")).toContainText(
+    "Apple Music imported",
+  );
+  // A fan upload is a possible match, so it is not selected for the listener.
+  await expect(
+    page.getByLabel("Select Better Together", { exact: true }),
+  ).not.toBeChecked();
+});
+
 test("errors are actionable and settings persist", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Music or playlist link").fill("not a link");

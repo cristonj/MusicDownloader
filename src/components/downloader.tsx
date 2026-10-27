@@ -86,6 +86,37 @@ function ServiceIcon({
         />
       </svg>
     );
+  if (provider === "Apple Music")
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path d="M16.7 12.6c0-2 1.6-3 1.7-3.1-1-1.4-2.4-1.6-2.9-1.6-1.3-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7-1.4 0-2.6.8-3.3 2-1.4 2.4-.4 6 1 8 .7 1 1.5 2 2.5 2 1 0 1.3-.6 2.5-.6s1.5.6 2.5.6 1.7-.9 2.4-1.9c.8-1.1 1.1-2.2 1.1-2.3-.1 0-2.1-.8-2.1-3.1ZM14.3 5.9c.5-.6.9-1.5.8-2.4-.8 0-1.7.5-2.3 1.2-.5.6-.9 1.5-.8 2.3.9.1 1.8-.4 2.3-1.1Z" />
+      </svg>
+    );
+  if (provider === "Amazon Music")
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="11" fill="currentColor" />
+        <path
+          d="M9 15.5V8l5.5 1.4v5.3M9 15.5a1.6 1.6 0 1 1-1.6-1.6c.6 0 1.2.3 1.6.8m5.5-1.3a1.6 1.6 0 1 1-1.6-1.6c.7 0 1.3.3 1.6.8"
+          stroke="var(--surface)"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
   if (provider === "SoundCloud") return <AudioLines size={size} />;
   if (provider === "Bandcamp")
     return (
@@ -101,10 +132,19 @@ function ServiceIcon({
     );
   return <FileAudio size={size} />;
 }
-const providers: Provider[] = ["YouTube", "Spotify", "SoundCloud", "Bandcamp"];
+const providers: Provider[] = [
+  "YouTube",
+  "Spotify",
+  "Apple Music",
+  "Amazon Music",
+  "SoundCloud",
+  "Bandcamp",
+];
 const placeholders: Record<string, string> = {
   YouTube: "Paste a YouTube song or playlist link",
   Spotify: "Paste a Spotify song, album, or playlist link",
+  "Apple Music": "Paste an Apple Music song, album, or playlist link",
+  "Amazon Music": "Paste an Amazon Music song or album link",
   SoundCloud: "Paste a SoundCloud track or set link",
   Bandcamp: "Paste a Bandcamp track or album link",
 };
@@ -905,9 +945,11 @@ export default function Downloader() {
                   <strong>About service links</strong>
                   <p>
                     The desktop helper opens links using your connection.
-                    Spotify supplies the track list; audio comes from the
-                    YouTube matches you select. Bandcamp purchases and private
-                    or restricted tracks need your original files.
+                    Spotify, Apple Music, and Amazon Music supply the track
+                    list; audio comes from the YouTube matches you select.
+                    Amazon Music playlists stay behind its sign-in, so paste its
+                    album or song links. Bandcamp purchases and private or
+                    restricted tracks need your original files.
                   </p>
                 </div>
                 <button

@@ -5,6 +5,7 @@ import {
 } from "./helper";
 import {
   extensionFor,
+  isMatchProvider,
   isMediaHost,
   MAX_FILE_BYTES,
   MAX_TRACKS,
@@ -131,7 +132,7 @@ export async function resolveLink(
           : [],
   );
   const label =
-    provider === "Spotify" ||
+    isMatchProvider(provider) ||
     jobs.every((job: { path: string }) => job.path === "/api/match")
       ? "Matching tracks on YouTube"
       : "Loading track details";
@@ -243,7 +244,8 @@ export async function resolveLink(
             : undefined,
       // Only confident matches start selected; the rest wait for review.
       selected:
-        !item.error && (provider !== "Spotify" || item.matchConfident === true),
+        !item.error &&
+        (!isMatchProvider(provider) || item.matchConfident === true),
       status: item.error ? "error" : "ready",
       error: typeof item.error === "string" ? item.error : undefined,
       progress: 0,

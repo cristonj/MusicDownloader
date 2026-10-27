@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isMediaHost, providerFor } from "@/lib/model";
+import { AMAZON_MUSIC_HOSTS, isMediaHost, providerFor } from "@/lib/model";
 export class HttpError extends Error {
   constructor(
     public status: number,
@@ -75,6 +75,10 @@ export function allowedSource(value: string): URL {
     provider === "YouTube" ||
     (provider === "Spotify" &&
       ["open.spotify.com", "spotify.link"].includes(url.hostname)) ||
+    (provider === "Apple Music" &&
+      ["music.apple.com", "geo.music.apple.com"].includes(url.hostname)) ||
+    (provider === "Amazon Music" &&
+      AMAZON_MUSIC_HOSTS.includes(url.hostname)) ||
     (provider === "Bandcamp" &&
       /^(?:[a-z0-9-]+\.)?bandcamp\.com$/.test(url.hostname)) ||
     (provider === "SoundCloud" &&
@@ -91,7 +95,7 @@ export function allowedSource(value: string): URL {
   )
     throw new HttpError(
       400,
-      "Use a YouTube, Spotify, SoundCloud, or Bandcamp link.",
+      "Use a YouTube, Spotify, Apple Music, Amazon Music, SoundCloud, or Bandcamp link.",
     );
   // Music share links identify the same recordings as regular YouTube.
   // Use one extraction/cache path without the share-specific tracking token.

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bytesLabel,
   defaults,
+  isMatchProvider,
   MAX_BATCH_BYTES,
   MAX_TRACKS,
   outputFilename,
@@ -172,10 +173,13 @@ export function useLibrary() {
       setTracks((items) => [...items, ...result.tracks]);
       setCollection(result.title);
       if (result.notice) notify(result.notice, "error");
-      else if (result.tracks.some((t) => t.provider === "Spotify"))
-        notify(
-          "Spotify imported. Confident matches are selected; review the rest before downloading.",
-        );
+      else {
+        const matched = result.tracks.find((t) => isMatchProvider(t.provider));
+        if (matched)
+          notify(
+            `${matched.provider} imported. Confident matches are selected; review the rest before downloading.`,
+          );
+      }
       return true;
     } catch (error) {
       if (error instanceof HelperRequiredError) setHelperOpen(true);

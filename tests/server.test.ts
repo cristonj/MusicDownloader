@@ -9,7 +9,7 @@ import {
 } from "../src/server/security";
 import { matchScore, matchTrack } from "../src/server/catalog";
 import { CHUNK_BYTES, hlsManifest, mediaChunk } from "../src/server/media";
-import { mediaFetch } from "../src/server/upstream";
+import { mediaFetch, publicFetch } from "../src/server/upstream";
 import { extract } from "../src/server/extractor";
 import { POST as resolve } from "../src/app/api/resolve/route";
 import { POST as lookup } from "../src/app/api/lookup/route";
@@ -450,6 +450,194 @@ describe("private server endpoints", () => {
   });
 });
 
+describe("metadata-only services", () => {
+  const importLink = async (url: string) =>
+    resolve(
+      new Request("http://localhost/api/resolve", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      }),
+    );
+  const json = (value: unknown) => new Response(JSON.stringify(value));
+  it("accepts Apple Music and Amazon Music links by host, not by lookalike", () => {
+    expect(
+      allowedSource("https://music.apple.com/us/album/dreams/1440857781")
+        .hostname,
+    ).toBe("music.apple.com");
+    expect(
+      allowedSource("https://music.amazon.co.uk/albums/B0CH3YL376").hostname,
+    ).toBe("music.amazon.co.uk");
+    for (const url of [
+      "https://music.apple.com.attacker.test/us/album/x/1",
+      "https://apple.com/us/album/x/1",
+      "https://music.amazon.attacker.test/albums/B0CH3YL376",
+      "http://music.apple.com/us/album/x/1",
+    ])
+      expect(() => allowedSource(url)).toThrow();
+  });
+  it("reads an Apple Music album from the public iTunes catalogue", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) => {
+      expect(url).toContain("itunes.apple.com/lookup");
+      expect(url).toContain("id=1440857781");
+      expect(url).toContain("entity=song");
+      expect(url).toContain("country=gb");
+      return json({
+        results: [
+          {
+            wrapperType: "collection",
+            collectionName: "In Between Dreams",
+          },
+          {
+            wrapperType: "track",
+            kind: "song",
+            trackName: "Better Together",
+            artistName: "Jack Johnson",
+            trackTimeMillis: 207679,
+          },
+          {
+            wrapperType: "track",
+            kind: "music-video",
+            trackName: "Better Together (Video)",
+            artistName: "Jack Johnson",
+          },
+        ],
+      });
+    });
+    const result = await (
+      await importLink(
+        "https://music.apple.com/gb/album/in-between-dreams/1440857781",
+      )
+    ).json();
+    expect(result.title).toBe("In Between Dreams");
+    // Videos are not songs, and metadata carries names, never audio.
+    expect(result.tracks).toHaveLength(1);
+    expect(result.tracks[0]).toMatchObject({
+      title: "Better Together",
+      artist: "Jack Johnson",
+      duration: 207.679,
+    });
+    expect(result.tracks[0].mediaUrl).toBeUndefined();
+    // The YouTube match reports which service asked for it.
+    expect(readTicket(result.tracks[0].matchTicket, "match").origin).toBe(
+      "Apple Music",
+    );
+  });
+  it("names the artist of every song in an Apple Music playlist", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) =>
+      url.includes("itunes.apple.com")
+        ? json({
+            results: [
+              {
+                wrapperType: "track",
+                kind: "song",
+                trackId: 6822497774,
+                trackName: "Housewife",
+                artistName: "Tate McRae",
+                trackTimeMillis: 208810,
+              },
+            ],
+          })
+        : new Response(
+            `<script type="application/ld+json">${JSON.stringify({
+              "@type": "MusicPlaylist",
+              name: "Today’s Hits",
+              author: { name: "Apple Music Hits" },
+              track: [
+                {
+                  name: "Housewife",
+                  url: "https://music.apple.com/us/song/housewife/6822497774",
+                  duration: "PT3M28S",
+                },
+                { name: "Uncatalogued", duration: "PT1H2M3S" },
+              ],
+            })}</script>`,
+          ),
+    );
+    const result = await (
+      await importLink(
+        "https://music.apple.com/us/playlist/todays-hits/pl.f4d106fed2bd41149aaacabb233eb5eb",
+      )
+    ).json();
+    expect(result.title).toBe("Today’s Hits");
+    expect(result.tracks[0]).toMatchObject({
+      title: "Housewife",
+      artist: "Tate McRae",
+      duration: 208.81,
+    });
+    // A song missing from the catalogue keeps the playlist's own details.
+    expect(result.tracks[1]).toMatchObject({
+      title: "Uncatalogued",
+      artist: "Apple Music Hits",
+      duration: 3723,
+    });
+  });
+  it("reads an Amazon Music album from the public music database", async () => {
+    vi.mocked(publicFetch).mockImplementation(async (url) =>
+      url.includes("/url/?resource=")
+        ? json(
+            url.includes("music.amazon.com/albums/B0CH3YL376")
+              ? {
+                  relations: [
+                    {
+                      "target-type": "release",
+                      release: { id: "9c6bbc58", title: "Softly Spoken" },
+                    },
+                  ],
+                }
+              : { relations: [] },
+          )
+        : json({
+            title: "Softly Spoken",
+            "artist-credit": [{ name: "Glimlip" }],
+            media: [
+              {
+                tracks: [
+                  {
+                    title: "Softly Spoken",
+                    length: 138313,
+                    "artist-credit": [
+                      { name: "Glimlip", joinphrase: " & " },
+                      { name: "azayaka" },
+                    ],
+                  },
+                  { title: "Untitled credit", length: 90000 },
+                ],
+              },
+            ],
+          }),
+    );
+    const result = await (
+      await importLink("https://music.amazon.com/albums/B0CH3YL376")
+    ).json();
+    expect(result.title).toBe("Softly Spoken");
+    expect(result.tracks[0]).toMatchObject({
+      title: "Softly Spoken",
+      artist: "Glimlip & azayaka",
+      duration: 138.313,
+    });
+    // A track without its own credit is the album's artist.
+    expect(result.tracks[1].artist).toBe("Glimlip");
+    expect(readTicket(result.tracks[1].matchTicket, "match").origin).toBe(
+      "Amazon Music",
+    );
+  });
+  it("says why an Amazon Music playlist cannot be imported", async () => {
+    const response = await importLink(
+      "https://music.amazon.com/playlists/B073H3G18R",
+    );
+    expect(response.status).toBe(422);
+    expect((await response.json()).detail).toMatch(/sign-in/);
+    expect(publicFetch).not.toHaveBeenCalled();
+  });
+  it("explains an Amazon Music album the public database does not list", async () => {
+    vi.mocked(publicFetch).mockResolvedValue(json({ relations: [] }));
+    const response = await importLink(
+      "https://music.amazon.com/albums/B0CH3YL377",
+    );
+    expect(response.status).toBe(422);
+    expect((await response.json()).detail).toMatch(/public music database/);
+  });
+});
 describe("bounded audio transport", () => {
   const ticket = {
     kind: "media" as const,

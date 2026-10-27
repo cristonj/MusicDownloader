@@ -1,4 +1,6 @@
 import { durationLabel, MAX_TRACKS, providerFor } from "@/lib/model";
+import { appleMusicMetadata } from "./apple";
+import { amazonMusicMetadata } from "./amazon";
 import { allowedSource, HttpError, signTicket } from "./security";
 import { extract, type Extracted } from "./extractor";
 import { spotifyMetadata } from "./spotify";
@@ -143,13 +145,24 @@ function catalogTrack(
 }
 export async function resolveCatalog(value: string, signal?: AbortSignal) {
   const url = allowedSource(value);
-  if (["spotify.link", "open.spotify.com"].includes(url.hostname)) {
-    const result = await spotifyMetadata(url.href);
+  const provider = providerFor(url);
+  // Spotify, Apple Music, and Amazon Music publish names, not audio. Each
+  // track carries a signed ticket the browser redeems for a YouTube match.
+  const metadata =
+    provider === "Spotify"
+      ? spotifyMetadata
+      : provider === "Apple Music"
+        ? appleMusicMetadata
+        : provider === "Amazon Music"
+          ? amazonMusicMetadata
+          : undefined;
+  if (metadata) {
+    const result = await metadata(url.href);
     return {
       ...result,
       tracks: result.tracks.map((track) => ({
         ...track,
-        matchTicket: signTicket({ kind: "match", ...track }),
+        matchTicket: signTicket({ kind: "match", ...track, origin: provider }),
       })),
     };
   }
@@ -161,7 +174,7 @@ export async function resolveCatalog(value: string, signal?: AbortSignal) {
     };
   if (info.entries.length > MAX_TRACKS)
     throw new HttpError(422, `Import up to ${MAX_TRACKS} tracks at a time.`);
-  const bandcamp = providerFor(url) === "Bandcamp";
+  const bandcamp = provider === "Bandcamp";
   // Bandcamp album listings omit artists. Compilations title tracks
   // "Artist - Title"; otherwise the album's account is the artist.
   const albumArtist = bandcamp

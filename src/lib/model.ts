@@ -3,6 +3,8 @@ export type Provider =
   | "SoundCloud"
   | "Bandcamp"
   | "Spotify"
+  | "Apple Music"
+  | "Amazon Music"
   | "Direct link"
   | "Local file";
 export type Format =
@@ -87,6 +89,34 @@ export const isMediaHost = (hostname: string) =>
     (host) => hostname === host || hostname.endsWith(`.${host}`),
   );
 
+// Services that publish track names but no downloadable audio. Their tracks
+// are matched to uploads on YouTube or SoundCloud instead.
+export const MATCH_PROVIDERS: Provider[] = [
+  "Spotify",
+  "Apple Music",
+  "Amazon Music",
+];
+export const isMatchProvider = (provider: Provider) =>
+  MATCH_PROVIDERS.includes(provider);
+// Amazon Music uses one host per storefront.
+export const AMAZON_MUSIC_HOSTS = [
+  "com",
+  "co.uk",
+  "de",
+  "fr",
+  "it",
+  "es",
+  "nl",
+  "se",
+  "pl",
+  "ca",
+  "com.au",
+  "com.br",
+  "com.mx",
+  "co.jp",
+  "in",
+].map((suffix) => `music.amazon.${suffix}`);
+
 export function parseUrl(input: string): URL {
   let url: URL;
   try {
@@ -119,6 +149,9 @@ export function providerFor(url: URL): Provider {
   if (host === "bandcamp.com" || host.endsWith(".bandcamp.com"))
     return "Bandcamp";
   if (host === "open.spotify.com" || host === "spotify.link") return "Spotify";
+  if (["music.apple.com", "geo.music.apple.com"].includes(host))
+    return "Apple Music";
+  if (AMAZON_MUSIC_HOSTS.includes(host)) return "Amazon Music";
   return "Direct link";
 }
 export function safeFilename(name: string): string {
