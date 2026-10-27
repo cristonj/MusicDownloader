@@ -554,7 +554,9 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
   let hostedSourceRequests = 0,
     localSourceRequests = 0;
   await page.route("**/api/helper-release", (route) =>
-    route.fulfill({ json: { windows: true, mac: true, linux: true } }),
+    route.fulfill({
+      json: { windows: true, windowsPortable: true, mac: true, linux: true },
+    }),
   );
   await page.route("http://127.0.0.1:45821/**", async (route) => {
     const request = route.request(),
@@ -617,8 +619,14 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
   await expect(page).not.toHaveURL(/helper_token/);
   await page.getByLabel("Helper operating system").selectOption("windows");
   await expect(
-    page.getByRole("link", { name: "Download helper .exe" }),
-  ).toHaveAttribute("href", /MusicDownloader-Helper-Windows.exe$/);
+    page.getByRole("link", { name: "Download installer" }),
+  ).toHaveAttribute(
+    "href",
+    /^https:\/\/github\.com\/cristonj\/MusicDownloader\/releases\/download\/helper-v1\/MusicDownloader-Helper-Windows-Setup\.exe$/,
+  );
+  await expect(
+    page.getByRole("link", { name: "Portable .exe" }),
+  ).toHaveAttribute("href", /MusicDownloader-Helper-Windows\.exe$/);
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await page
     .getByLabel("Music or playlist link")
