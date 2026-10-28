@@ -1,4 +1,3 @@
-import { MAX_FILE_BYTES } from "@/lib/model";
 import {
   extract,
   extractUsingClient,
@@ -143,8 +142,6 @@ async function playableManifest(
 ): Promise<AudioManifest> {
   if (info.is_live)
     throw new HttpError(422, "Live streams cannot be downloaded.");
-  if ((info.filesize || info.filesize_approx || 0) > MAX_FILE_BYTES)
-    throw new HttpError(413, "This track exceeds the 150 MB browser limit.");
   if (!info.url) throw new HttpError(422, "No audio source was found.");
   const headers = sourceHeaders(info.http_headers);
   let manifest: AudioManifest;
@@ -280,8 +277,8 @@ export async function mediaChunk(
   if (
     !Number.isSafeInteger(start) ||
     start < 0 ||
-    end < start ||
-    start >= MAX_FILE_BYTES
+    !Number.isSafeInteger(end) ||
+    end < start
   )
     throw new HttpError(416, "Invalid audio range.");
   const base = ticket.range?.[0] || 0;
@@ -318,10 +315,6 @@ export async function mediaChunk(
   const total = ticket.range
     ? ticket.range[1] - ticket.range[0] + 1
     : fullLength;
-  if (total && total > MAX_FILE_BYTES) {
-    await upstream.body?.cancel();
-    throw new HttpError(413, "This track exceeds the 150 MB browser limit.");
-  }
   const reader = upstream.body?.getReader();
   if (!reader) throw new HttpError(502, "No audio was returned.");
   const chunks: Uint8Array[] = [];

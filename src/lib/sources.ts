@@ -7,8 +7,6 @@ import {
   extensionFor,
   isArtworkUrl,
   isMatchProvider,
-  isMediaHost,
-  MAX_FILE_BYTES,
   MAX_TRACKS,
   parseUrl,
   providerFor,
@@ -42,8 +40,6 @@ async function sourceFetch(
   }
 }
 export function localTrack(file: File): Track {
-  if (file.size > MAX_FILE_BYTES)
-    throw new Error(`${file.name} is over the 150 MB per-track limit.`);
   if (
     !file.type.startsWith("audio/") &&
     !/\.(mp3|wav|flac|m4a|aac|ogg|opus|aiff?|webm|mp4)$/i.test(file.name)
@@ -429,25 +425,10 @@ async function fetchSourceAudio(
     !/^[a-z0-9]{1,5}$/.test(manifest.extension)
   )
     throw new Error("This source returned an invalid audio stream.");
-  if (track.transport === "helper" && typeof manifest.browserUrl === "string") {
-    const remote = parseUrl(manifest.browserUrl);
-    if (remote.protocol === "https:" && isMediaHost(remote.hostname)) {
-      try {
-        const direct = await fetchDirectAudio(
-          { ...track, mediaUrl: remote.href, extension: manifest.extension },
-          signal,
-          onProgress,
-        );
-        return { ...direct, remuxTo: manifest.remuxTo };
-      } catch (error) {
-        if (signal.aborted) throw error;
-      }
-    }
-  }
   const controller = new AbortController(),
     combined = AbortSignal.any([signal, controller.signal]);
   const chunkSize = 2 * 1024 * 1024;
-  const pieces: Uint8Array<ArrayBuffer>[][] = new Array(manifest.parts.length);
+  const pieces: Blob[][] = new Array(manifest.parts.length);
   let next = 0,
     received = 0,
     complete = 0;
@@ -462,7 +443,7 @@ async function fetchSourceAudio(
     );
     if (response.status === 416 && offset > 0)
       return {
-        bytes: [] as Uint8Array<ArrayBuffer>[],
+        blob: new Blob(),
         count: 0,
         total: offset,
         more: false,
@@ -484,8 +465,6 @@ async function fetchSourceAudio(
     )
       throw new Error("The source returned an invalid audio range.");
     const total = range[3] === "*" ? 0 : Number(range[3]);
-    if (total > MAX_FILE_BYTES)
-      throw new Error("This track exceeds the browser download limit.");
     const reader = response.body.getReader(),
       bytes: Uint8Array<ArrayBuffer>[] = [];
     let count = 0;
@@ -495,8 +474,8 @@ async function fetchSourceAudio(
         if (done) break;
         count += value.length;
         received += value.length;
-        if (count > chunkSize || received > MAX_FILE_BYTES)
-          throw new Error("This track exceeds the browser download limit.");
+        if (count > chunkSize)
+          throw new Error("The source returned an oversized audio chunk.");
         bytes.push(value);
       }
     } catch (error) {
@@ -511,7 +490,7 @@ async function fetchSourceAudio(
         : complete / manifest.parts.length,
     );
     return {
-      bytes,
+      blob: new Blob(bytes),
       count,
       total,
       more: response.headers.get("X-Audio-More") === "1",
@@ -529,7 +508,7 @@ async function fetchSourceAudio(
           )
             throw new Error("Invalid audio segment.");
           const first = await readRange(part, 0);
-          const chunks: Uint8Array<ArrayBuffer>[][] = [first.bytes];
+          const chunks: Blob[] = [first.blob];
           if (first.more && first.total) {
             const starts = Array.from(
               { length: Math.ceil((first.total - first.count) / chunkSize) },
@@ -549,7 +528,7 @@ async function fetchSourceAudio(
                     throw new Error(
                       "The audio transfer was interrupted. Try again.",
                     );
-                  chunks[index + 1] = result.bytes;
+                  chunks[index + 1] = result.blob;
                 }
               }),
             );
@@ -557,12 +536,12 @@ async function fetchSourceAudio(
             let offset = first.count;
             while (true) {
               const result = await readRange(part, offset);
-              chunks.push(result.bytes);
+              chunks.push(result.blob);
               offset += result.count;
               if (!result.more) break;
             }
           }
-          pieces[index] = chunks.flat();
+          pieces[index] = chunks;
           complete++;
           onProgress(complete / manifest.parts.length);
         }
@@ -610,23 +589,17 @@ async function fetchDirectAudio(
   if (/text\/|application\/(json|xml)/.test(mime))
     throw new Error("This link returned a page instead of audio.");
   const total = Number(response.headers.get("content-length")) || 0;
-  if (total > MAX_FILE_BYTES)
-    throw new Error("This track exceeds the 150 MB browser limit.");
   if (!response.body) throw new Error("This source did not return audio.");
   const reader = response.body.getReader();
-  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  const chunks: Blob[] = [];
   let received = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       received += value.length;
-      if (received > MAX_FILE_BYTES)
-        throw new Error("This track exceeds the 150 MB browser limit.");
-      chunks.push(value);
-      onProgress(
-        total ? received / total : Math.min(0.9, received / MAX_FILE_BYTES),
-      );
+      chunks.push(new Blob([value]));
+      onProgress(total ? received / total : 0);
     }
   } catch (error) {
     await reader.cancel().catch(() => {});

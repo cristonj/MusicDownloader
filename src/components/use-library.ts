@@ -4,7 +4,6 @@ import {
   bytesLabel,
   defaults,
   isMatchProvider,
-  MAX_BATCH_BYTES,
   MAX_TRACKS,
   outputFilename,
   readPreferences,
@@ -117,7 +116,11 @@ export function useLibrary() {
   const changePrefs = (update: Partial<Preferences>) => {
     if (running.current) return;
     setPrefs((p) => ({ ...p, ...update }));
-    if (Object.keys(update).length > 0)
+    if (
+      ["format", "bitrate", "sampleRate", "bitDepth"].some(
+        (key) => key in update,
+      )
+    )
       setTracks((items) =>
         items.map((t) => ({
           ...t,
@@ -133,21 +136,12 @@ export function useLibrary() {
     if (running.current || resolveAbort.current) return;
     const accepted: Track[] = [];
     const errors: string[] = [];
-    let size = current.current.reduce(
-      (sum, track) => sum + (track.file?.size || 0) + (track.output?.size || 0),
-      0,
-    );
     for (const file of Array.from(files)) {
       try {
         if (current.current.length + accepted.length >= MAX_TRACKS)
           throw new Error(`Add up to ${MAX_TRACKS} tracks at a time.`);
-        if (size + file.size > MAX_BATCH_BYTES)
-          throw new Error(
-            "This collection exceeds the 450 MB browser memory limit. Clear some tracks first.",
-          );
         const track = localTrack(file);
         accepted.push(track);
-        size += file.size;
       } catch (error) {
         errors.push((error as Error).message);
       }
@@ -173,6 +167,7 @@ export function useLibrary() {
       else setNotice(null);
       return !track.error;
     } catch (error) {
+      if (error instanceof HelperRequiredError) setHelperOpen(true);
       if (!controller.signal.aborted) notify((error as Error).message, "error");
       return false;
     } finally {
@@ -241,10 +236,6 @@ export function useLibrary() {
     const signal = controller.signal;
     const results: { name: string; blob: Blob }[] = [];
     let failures = 0;
-    let memory = current.current.reduce(
-      (sum, t) => sum + (t.file?.size || 0) + (t.output?.size || 0),
-      0,
-    );
     try {
       // Six transfers stream continuously while a few WASM conversions run in
       // parallel, so a slow track or conversion never stalls the others.
@@ -268,15 +259,6 @@ export function useLibrary() {
               progress: value * (prefs.format === "original" ? 0.99 : 0.35),
             }),
           );
-          if (!track.file) {
-            memory += data.blob.size;
-            if (memory > MAX_BATCH_BYTES) {
-              memory -= data.blob.size;
-              throw new Error(
-                "Browser memory limit reached. Export a smaller selection.",
-              );
-            }
-          }
           patch(track.id, { extension: data.extension });
           return data;
         } catch (error) {
@@ -314,12 +296,6 @@ export function useLibrary() {
             );
             if (signal.aborted)
               throw new DOMException("Cancelled", "AbortError");
-            if (output !== input)
-              memory += output.size - (track.file ? 0 : input.size);
-            if (memory > MAX_BATCH_BYTES)
-              throw new Error(
-                "Converted audio exceeds the browser memory limit. Try a smaller selection.",
-              );
           }
           const name =
             track.outputName ||

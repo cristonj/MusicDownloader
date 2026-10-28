@@ -22,8 +22,10 @@ import {
 const COLUMN_ROWS = 25;
 const FOCUS_ROWS = 60;
 interface ColumnState {
+  query: string;
   column?: FeedColumn;
   error?: string;
+  notice?: string;
   loading: boolean;
   size: number;
 }
@@ -71,27 +73,52 @@ export default function Feed({
   const [columns, setColumns] = useState<Record<string, ColumnState>>({});
   const [added, setAdded] = useState<string[]>([]);
   const [adding, setAdding] = useState<string | null>(null);
+  const [connection, setConnection] = useState(0);
   const requests = useRef(new Map<string, AbortController>());
+  const searchInput = useRef<HTMLInputElement>(null);
   const load = useCallback((provider: Provider, term: string, size: number) => {
     requests.current.get(provider)?.abort();
+    const notice =
+      !term && provider === "SoundCloud"
+        ? "SoundCloud publishes no public chart. Search for an artist or song."
+        : term && provider === "Spotify"
+          ? "Spotify search needs an account. Its public chart is available when you clear the search."
+          : undefined;
+    if (notice) {
+      setColumns((state) => ({
+        ...state,
+        [provider]: { notice, loading: false, size, query: term },
+      }));
+      return;
+    }
     const controller = new AbortController();
     requests.current.set(provider, controller);
     setColumns((state) => ({
       ...state,
-      [provider]: { ...state[provider], loading: true, size },
+      [provider]: { loading: true, size, query: term },
     }));
     loadFeed(provider, term, size, controller.signal)
-      .then((column) =>
+      .then((column) => {
+        if (
+          controller.signal.aborted ||
+          requests.current.get(provider) !== controller
+        )
+          return;
         setColumns((state) => ({
           ...state,
-          [provider]: { column, loading: false, size },
-        })),
-      )
+          [provider]: { column, loading: false, size, query: term },
+        }));
+      })
       .catch((error: Error) => {
         if (controller.signal.aborted) return;
         setColumns((state) => ({
           ...state,
-          [provider]: { error: error.message, loading: false, size },
+          [provider]: {
+            error: error.message,
+            loading: false,
+            size,
+            query: term,
+          },
         }));
       });
   }, []);
@@ -102,14 +129,27 @@ export default function Feed({
     const size = focused ? FOCUS_ROWS : COLUMN_ROWS;
     for (const provider of shown) {
       const state = columns[provider];
-      if (!state || (!state.loading && state.size !== size)) {
+      if (!state || state.query !== search || state.size !== size) {
         load(provider, search, size);
       }
     }
     // Columns are loaded as they are revealed; the effect only reacts to the
     // search, the focused service, and which services are shown.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, focused, hidden.join(","), load]);
+  }, [search, focused, hidden.join(","), connection, load]);
+  useEffect(() => {
+    const reconnect = () => {
+      for (const controller of requests.current.values()) controller.abort();
+      setColumns({});
+      setConnection((value) => value + 1);
+    };
+    window.addEventListener("music-helper-connected", reconnect);
+    window.addEventListener("storage", reconnect);
+    return () => {
+      window.removeEventListener("music-helper-connected", reconnect);
+      window.removeEventListener("storage", reconnect);
+    };
+  }, []);
   useEffect(() => {
     const pending = requests.current;
     return () => {
@@ -117,8 +157,9 @@ export default function Feed({
     };
   }, []);
   const runSearch = (term: string) => {
-    setColumns({});
     setSearch(term);
+    for (const provider of shown)
+      load(provider, term, focused ? FOCUS_ROWS : COLUMN_ROWS);
   };
   const toggleHidden = (provider: Provider) =>
     setHidden(
@@ -151,6 +192,7 @@ export default function Feed({
         >
           <Search size={16} />
           <input
+            ref={searchInput}
             aria-label="Search every service"
             placeholder="Search every service…"
             value={query}
@@ -204,7 +246,7 @@ export default function Feed({
             <article
               key={provider}
               className={`feed-card provider-${providerSlug(provider)} ${
-                state.error ? "feed-card-short" : ""
+                state.error || state.notice ? "feed-card-short" : ""
               }`}
             >
               <header>
@@ -213,11 +255,15 @@ export default function Feed({
                   <strong>{provider}</strong>
                   <small>
                     {state.column?.title ||
-                      (state.error
-                        ? "Unavailable"
-                        : search
-                          ? "Searching…"
-                          : "Loading…")}
+                      (state.notice
+                        ? search
+                          ? "Chart only"
+                          : "Search available"
+                        : state.error
+                          ? "Unavailable"
+                          : search
+                            ? "Searching…"
+                            : "Loading…")}
                     {rows.length ? ` · ${rows.length} tracks` : ""}
                   </small>
                 </div>
@@ -261,22 +307,37 @@ export default function Feed({
               {state.error && (
                 <div className="feed-message">
                   <p>{state.error}</p>
-                  {!search && (
-                    <button
-                      onClick={() => {
-                        setQuery("");
-                        setFocused(provider);
-                      }}
-                    >
-                      Search {provider} instead
-                    </button>
-                  )}
+                  <button
+                    onClick={() =>
+                      load(provider, search, focused ? FOCUS_ROWS : COLUMN_ROWS)
+                    }
+                  >
+                    Try again
+                  </button>
                 </div>
               )}
-              {!state.loading && !state.error && (
+              {state.notice && (
+                <div className="feed-message">
+                  <p>{state.notice}</p>
+                  <button
+                    onClick={() => {
+                      if (search) {
+                        setQuery("");
+                        runSearch("");
+                      } else {
+                        setFocused(provider);
+                        searchInput.current?.focus();
+                      }
+                    }}
+                  >
+                    {search ? "Show charts" : `Search ${provider}`}
+                  </button>
+                </div>
+              )}
+              {!state.loading && !state.error && !state.notice && (
                 <ol>
                   {rows.map((row, index) => {
-                    const id = `${provider}:${index}:${row.title}`;
+                    const id = `${provider}:${row.sourceUrl || `${row.artist}:${row.title}`}`;
                     const done = added.includes(id);
                     return (
                       <li key={id}>
@@ -294,7 +355,7 @@ export default function Feed({
                         <button
                           className={`feed-add ${done ? "done" : ""}`}
                           aria-label={`Add ${row.title} from ${provider}`}
-                          disabled={busy || adding === id || done}
+                          disabled={busy || adding !== null || done}
                           onClick={async () => {
                             setAdding(id);
                             const ok = await add(row, provider);

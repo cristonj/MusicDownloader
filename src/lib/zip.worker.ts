@@ -1,29 +1,52 @@
 /// <reference lib="webworker" />
-import { zipSync } from "fflate";
+import { Zip, ZipPassThrough } from "fflate";
 import { safeFilename } from "./model";
-self.onmessage = (
-  event: MessageEvent<{ name: string; buffer: ArrayBuffer }[]>,
+self.onmessage = async (
+  event: MessageEvent<{ name: string; blob: Blob }[]>,
 ) => {
+  const parts: Blob[] = [];
+  const names = new Set<string>();
+  const zip = new Zip((error, data, final) => {
+    if (error) throw error;
+    // Blob parts let the browser spill large archives to disk instead of
+    // allocating every input and the complete ZIP in contiguous JS memory.
+    parts.push(new Blob([new Uint8Array(data)]));
+    if (final)
+      self.postMessage({ blob: new Blob(parts, { type: "application/zip" }) });
+  });
   try {
-    const files: Record<string, Uint8Array> = Object.create(null);
-    for (const { name, buffer } of event.data) {
+    for (const { name, blob } of event.data) {
       const base = safeFilename(name);
       let unique = base;
       let index = 2;
-      while (Object.hasOwn(files, unique)) {
+      while (names.has(unique)) {
         const dot = base.lastIndexOf(".");
         unique =
           dot > 0
             ? `${base.slice(0, dot)} (${index++})${base.slice(dot)}`
             : `${base} (${index++})`;
       }
-      files[unique] = new Uint8Array(buffer);
+      names.add(unique);
+      const entry = new ZipPassThrough(unique);
+      zip.add(entry);
+      const reader = blob.stream().getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          entry.push(value);
+        }
+        entry.push(new Uint8Array(), true);
+      } finally {
+        await reader.cancel().catch(() => {});
+      }
     }
-    const zipped = zipSync(files, { level: 0 });
-    self.postMessage({ data: zipped }, { transfer: [zipped.buffer] });
+    zip.end();
   } catch {
+    zip.terminate();
     self.postMessage({
-      error: "Not enough memory to create this ZIP. Try a smaller batch.",
+      error:
+        "This device could not create the ZIP. Download tracks individually or use a smaller batch.",
     });
   }
 };

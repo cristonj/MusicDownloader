@@ -10,7 +10,7 @@ The self-contained helper bundles Node and the verified standalone extraction to
 
 When connected, **all source requests**—YouTube/YouTube Music, SoundCloud, Bandcamp, Spotify/Apple Music/Amazon Music metadata, and their YouTube matching—run from the computer's network connection. Existing tracks imported through the hosted API are re-resolved locally before downloading. This removes dependence on Netlify's IP for those operations; it does not guarantee access to private, region-restricted, or otherwise unavailable tracks, or remove a provider block affecting the user's own connection.
 
-The browser first tries direct CDN transfers when permitted. Cross-origin or header restrictions fall back to the loopback helper. HLS/DASH assembly, audio conversion, and playlist ZIP creation stay in browser workers. Local files never go to the helper or web server. Spotify, Apple Music, and Amazon Music audio comes from the visible YouTube matches, not from decrypted streams of those services.
+Service audio transfers use the loopback helper when connected, avoiding CDN cross-origin and header restrictions. HLS/DASH assembly, audio conversion, and playlist ZIP creation stay in browser workers. Local files never go to the helper or web server. Spotify, Apple Music, and Amazon Music audio comes from the visible YouTube matches, not from decrypted streams of those services.
 
 The helper listens only on `127.0.0.1`, validates the Host and exact web-app Origin, requires its random per-launch token, and uses signed, allowlisted source URLs. Pairing secrets travel in the browser fragment (not to Netlify), then move to origin-scoped local storage and are removed from the address bar. Other websites cannot use its local API. Modern browsers may require local network permission.
 
@@ -50,7 +50,7 @@ Each server invocation has a bounded timeout. Public source URLs and CDN hosts a
 
 Availability, region restrictions, anti-bot checks, and upstream metadata/extractor changes can still prevent individual downloads. Encrypted/live streams and private or paid-only files require your originals. Spotify and Apple Music metadata may be unavailable or incomplete; use a smaller public playlist when the source does not expose the full list. There is no claim to download or decrypt Spotify, Apple Music, or Amazon Music streams.
 
-Browser limits: 150 MB per input, 450 MB retained collection. Playlists have no track cap; long ones show import progress. Phones may need smaller lossless batches. Tracks disappear on refresh; only audio preferences persist. Use music you own or have permission to download.
+There is no fixed per-file or collection byte limit. Transfers and ZIPs use Blob chunks instead of retaining the entire collection in JavaScript arrays. Conversion still needs working memory in FFmpeg WebAssembly; available device memory limits large conversions, and phones may need smaller lossless batches. ZIP archives use ZIP32 and must fit under its 4 GB format limit; larger collections can be downloaded individually. Tracks disappear on refresh; only audio preferences persist. Use music you own or have permission to download.
 
 ## Checks
 

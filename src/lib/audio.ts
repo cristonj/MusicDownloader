@@ -122,6 +122,13 @@ export async function convertAudio(
   } catch (error) {
     broken = true;
     if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+    if (
+      error instanceof RangeError ||
+      /memory|allocation|out of bounds/i.test(String(error))
+    )
+      throw new Error(
+        "This device ran out of memory converting the audio. Choose Original or convert a smaller file.",
+      );
     throw error instanceof Error
       ? error
       : new Error("The audio engine stopped. Try again or choose Original.");
@@ -146,13 +153,15 @@ export async function makeZip(
   files: { name: string; blob: Blob }[],
   signal: AbortSignal,
 ): Promise<Blob> {
-  const buffers = await Promise.all(
-    files.map(async (file) => ({
-      name: file.name,
-      buffer: await file.blob.arrayBuffer(),
-    })),
-  );
   if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+  // fflate writes ZIP32. Reserve room for names and directory records so a
+  // multi-gigabyte export fails clearly rather than wrapping its offsets.
+  if (
+    files.reduce((size, file) => size + file.blob.size + 1024, 22) >= 0xffffffff
+  )
+    throw new Error(
+      "This archive exceeds ZIP's 4 GB format limit. Download the tracks individually.",
+    );
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./zip.worker.ts", import.meta.url));
     const cleanup = () => {
@@ -165,11 +174,11 @@ export async function makeZip(
     };
     signal.addEventListener("abort", abort, { once: true });
     worker.onmessage = (
-      event: MessageEvent<{ data?: Uint8Array<ArrayBuffer>; error?: string }>,
+      event: MessageEvent<{ blob?: Blob; error?: string }>,
     ) => {
       cleanup();
       if (event.data.error) reject(new Error(event.data.error));
-      else resolve(new Blob([event.data.data!], { type: "application/zip" }));
+      else resolve(event.data.blob!);
     };
     worker.onerror = () => {
       cleanup();
@@ -179,9 +188,6 @@ export async function makeZip(
         ),
       );
     };
-    worker.postMessage(
-      buffers,
-      buffers.map((file) => file.buffer),
-    );
+    worker.postMessage(files);
   });
 }

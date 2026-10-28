@@ -9,7 +9,6 @@ import { POST as match } from "../src/app/api/match/route";
 import { POST as feed } from "../src/app/api/feed/route";
 import { POST as lookup } from "../src/app/api/lookup/route";
 import { GET as audio } from "../src/app/api/audio/route";
-import { readTicket } from "../src/server/security";
 import { GET as media } from "../src/app/api/media/route";
 
 export const HELPER_PORT = 45821;
@@ -79,7 +78,7 @@ export function startHelper(options: {
       if (url.pathname === "/health") {
         respond(200, {
           app: "MusicDownloader",
-          version: 3,
+          version: 4,
           ...options.state(),
         });
         return;
@@ -134,23 +133,8 @@ export function startHelper(options: {
         const outgoing: Record<string, string> = { ...cors };
         response.headers.forEach((value, key) => (outgoing[key] = value));
         res.writeHead(response.status, outgoing);
-        if (url.pathname === "/api/audio" && response.ok) {
-          const result = await response.json();
-          if (result.parts?.length === 1) {
-            const token = new URL(
-              result.parts[0],
-              options.origin,
-            ).searchParams.get("ticket");
-            if (token) {
-              const stream = readTicket(token, "media");
-              if (!stream.range) result.browserUrl = stream.url;
-            }
-          }
-          res.end(JSON.stringify(result));
-        } else {
-          const bytes = Buffer.from(await response.arrayBuffer());
-          res.end(bytes);
-        }
+        const bytes = Buffer.from(await response.arrayBuffer());
+        res.end(bytes);
       } catch (error) {
         if (!res.headersSent)
           respond(500, {

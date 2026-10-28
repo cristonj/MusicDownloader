@@ -9,20 +9,9 @@ export type Provider =
   | "Direct link"
   | "Local file";
 export type Format =
-  | "original"
-  | "mp3"
-  | "m4a"
-  | "flac"
-  | "wav"
-  | "ogg"
-  | "opus"
-  | "aiff";
+  "original" | "mp3" | "m4a" | "flac" | "wav" | "ogg" | "opus" | "aiff";
 export type TrackStatus =
-  | "ready"
-  | "fetching"
-  | "converting"
-  | "done"
-  | "error";
+  "ready" | "fetching" | "converting" | "done" | "error";
 export interface Track {
   id: string;
   title: string;
@@ -76,10 +65,7 @@ export const formats: { value: Format; label: string; note: string }[] = [
   { value: "opus", label: "Opus", note: "Efficient audio" },
   { value: "aiff", label: "AIFF", note: "Studio friendly" },
 ];
-export const MAX_FILE_BYTES = 150 * 1024 * 1024;
-export const MAX_BATCH_BYTES = 450 * 1024 * 1024;
-// A safety ceiling on request sizes, not a product limit. Downloads are still
-// bounded by MAX_BATCH_BYTES of browser memory.
+// Bound metadata requests, independently of the size of the audio files.
 export const MAX_TRACKS = 5000;
 // CDN hosts the services stream audio from. SoundCloud moved its HLS audio to
 // media-streaming.soundcloud.cloud; sndcdn.com still serves older tracks.

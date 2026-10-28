@@ -239,10 +239,10 @@ test("the service feed browses charts and adds a row to the collection", async (
   });
   await page.goto("/");
   // Every service gets its own column, including one that has no chart.
-  await expect(page.locator(".feed-column")).toHaveCount(4);
+  await expect(page.locator(".feed-card")).toHaveCount(4);
   await expect(page.getByText("A charting song")).toBeVisible();
   await expect(
-    page.getByText("SoundCloud publishes no public chart."),
+    page.getByText("SoundCloud publishes no public chart.", { exact: false }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Add A charting song from YouTube" })
@@ -291,7 +291,7 @@ test("errors are actionable and settings persist", async ({ page }) => {
   );
   // The feed is off until it is asked for, and stays as it is left.
   await expect(page.locator(".feed")).toHaveCount(0);
-  await page.getByLabel("Show service feeds").check();
+  await page.getByRole("switch", { name: "Show service feeds" }).click();
   await page.keyboard.press("Escape");
   await page.reload();
   await expect(page.locator(".feed")).toBeVisible();
@@ -553,6 +553,7 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     wav = Buffer.from(await demoFile().arrayBuffer());
   let hostedSourceRequests = 0,
     localSourceRequests = 0;
+  let localFeedRequests = 0;
   await page.route("**/api/helper-release", (route) =>
     route.fulfill({ json: { windows: true, mac: true, linux: true } }),
   );
@@ -572,10 +573,20 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     expect(request.headers().authorization).toBe(`Bearer ${token}`);
     if (path === "/health")
       await route.fulfill({
-        json: { app: "MusicDownloader", version: 3, ready: true },
+        json: { app: "MusicDownloader", version: 4, ready: true },
         headers,
       });
-    else if (path === "/api/resolve") {
+    else if (path === "/api/feed") {
+      localFeedRequests++;
+      const { provider } = request.postDataJSON();
+      await route.fulfill({
+        json: {
+          title: "Local chart",
+          tracks: [{ title: `${provider} local discovery`, artist: "Artist" }],
+        },
+        headers,
+      });
+    } else if (path === "/api/resolve") {
       localSourceRequests++;
       await route.fulfill({
         json: {
@@ -617,8 +628,8 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
   await expect(page).not.toHaveURL(/helper_token/);
   await page.getByLabel("Helper operating system").selectOption("windows");
   await expect(
-    page.getByRole("link", { name: "Download helper .exe" }),
-  ).toHaveAttribute("href", /MusicDownloader-Helper-Windows.exe$/);
+    page.getByRole("link", { name: "Download installer" }),
+  ).toHaveAttribute("href", /MusicDownloader-Helper-Windows-Setup.exe$/);
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await page
     .getByLabel("Music or playlist link")
@@ -635,4 +646,11 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
   expect((await readFile((await file.path())!)).equals(wav)).toBe(true);
   expect(localSourceRequests).toBe(1);
   expect(hostedSourceRequests).toBe(0);
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await page.getByRole("switch", { name: "Show service feeds" }).click();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByText("YouTube local discovery", { exact: true }),
+  ).toBeVisible();
+  expect(localFeedRequests).toBe(3);
 });
