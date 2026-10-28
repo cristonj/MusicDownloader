@@ -104,8 +104,10 @@ export function allowedSource(value: string): URL {
   // Use one extraction/cache path without the share-specific tracking token.
   if (provider === "YouTube") {
     if (url.hostname === "music.youtube.com") url.hostname = "www.youtube.com";
-    // A Short is an ordinary recording under a different path.
-    const short = url.pathname.match(/^\/shorts\/([a-zA-Z0-9_-]{11})\/?$/);
+    // Shorts and YouTube Music podcast pages identify ordinary recordings.
+    const short = url.pathname.match(
+      /^\/(?:shorts|podcast)\/([a-zA-Z0-9_-]{11})\/?$/,
+    );
     if (short) {
       url.pathname = "/watch";
       url.searchParams.set("v", short[1]);

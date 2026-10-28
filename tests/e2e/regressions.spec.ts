@@ -79,9 +79,15 @@ test("discovery switches preserve completed audio and stay aligned on mobile", a
   await toggle.focus();
   await page.keyboard.press("Space");
   await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect
+    .poll(async () => {
+      const track = await toggle.boundingBox(),
+        thumb = await toggle.locator("span").boundingBox();
+      return thumb!.x - track!.x;
+    })
+    .toBeGreaterThan(18);
   const track = await toggle.boundingBox(),
     thumb = await toggle.locator("span").boundingBox();
-  expect(thumb!.x).toBeGreaterThan(track!.x + 18);
   expect(thumb!.x + thumb!.width).toBeLessThanOrEqual(track!.x + track!.width);
   await page.screenshot({ path: info.outputPath("mobile-settings.png") });
   await page.keyboard.press("Escape");

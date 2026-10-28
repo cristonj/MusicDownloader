@@ -164,56 +164,60 @@ describe("private server endpoints", () => {
       allowedSource("https://api-v2.soundcloud.com/me/likes"),
     ).toThrow();
   });
-  it("opens YouTube Music share links through the regular YouTube audio path", async () => {
-    const shared =
-      "https://music.youtube.com/watch?v=xKJtIjB3pAI&si=3ZN4Gzsw8cDL-uIf";
-    const canonical = "https://www.youtube.com/watch?v=xKJtIjB3pAI";
-    vi.mocked(extract)
-      .mockResolvedValueOnce({
-        title: "Shared song",
-        webpage_url: shared,
-        ext: "m4a",
-      })
-      .mockResolvedValueOnce({
-        url: "https://r1.googlevideo.com/audio",
-        protocol: "https",
-        ext: "m4a",
-      });
-    const response = await resolve(
-      new Request("http://localhost/api/resolve", {
-        method: "POST",
-        body: JSON.stringify({ url: shared }),
-      }),
-    );
-    expect(response.status).toBe(200);
-    const result = await response.json();
-    expect(extract).toHaveBeenNthCalledWith(
-      1,
-      canonical,
-      true,
-      expect.any(AbortSignal),
-    );
-    expect(result.tracks[0].sourceUrl).toBe(canonical);
-    vi.mocked(mediaFetch).mockResolvedValue(
-      new Response(new Uint8Array([1]), {
-        headers: { "Content-Type": "audio/mp4" },
-      }),
-    );
-    const download = await audio(
-      new Request(`http://localhost${result.tracks[0].mediaUrl}`),
-    );
-    expect(download.status).toBe(200);
-    expect(extract).toHaveBeenNthCalledWith(
-      2,
-      canonical,
-      false,
-      expect.any(AbortSignal),
-    );
-    expect((await download.json()).parts).toHaveLength(1);
-    const playlist = allowedSource(shared + "&list=PLexample&index=3");
-    expect(playlist.searchParams.get("list")).toBe("PLexample");
-    expect(playlist.searchParams.get("index")).toBe("3");
-  });
+  it.each([
+    "https://music.youtube.com/watch?v=xKJtIjB3pAI&si=3ZN4Gzsw8cDL-uIf",
+    "https://music.youtube.com/podcast/xKJtIjB3pAI?si=3ZN4Gzsw8cDL-uIf",
+  ])(
+    "opens the YouTube Music link %s through the regular audio path",
+    async (shared) => {
+      const canonical = "https://www.youtube.com/watch?v=xKJtIjB3pAI";
+      vi.mocked(extract)
+        .mockResolvedValueOnce({
+          title: "Shared song",
+          webpage_url: shared,
+          ext: "m4a",
+        })
+        .mockResolvedValueOnce({
+          url: "https://r1.googlevideo.com/audio",
+          protocol: "https",
+          ext: "m4a",
+        });
+      const response = await resolve(
+        new Request("http://localhost/api/resolve", {
+          method: "POST",
+          body: JSON.stringify({ url: shared }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const result = await response.json();
+      expect(extract).toHaveBeenNthCalledWith(
+        1,
+        canonical,
+        true,
+        expect.any(AbortSignal),
+      );
+      expect(result.tracks[0].sourceUrl).toBe(canonical);
+      vi.mocked(mediaFetch).mockResolvedValue(
+        new Response(new Uint8Array([1]), {
+          headers: { "Content-Type": "audio/mp4" },
+        }),
+      );
+      const download = await audio(
+        new Request(`http://localhost${result.tracks[0].mediaUrl}`),
+      );
+      expect(download.status).toBe(200);
+      expect(extract).toHaveBeenNthCalledWith(
+        2,
+        canonical,
+        false,
+        expect.any(AbortSignal),
+      );
+      expect((await download.json()).parts).toHaveLength(1);
+      const playlist = allowedSource(shared + "&list=PLexample&index=3");
+      expect(playlist.searchParams.get("list")).toBe("PLexample");
+      expect(playlist.searchParams.get("index")).toBe("3");
+    },
+  );
   it("opens a source only when its signed audio endpoint is requested", async () => {
     vi.mocked(extract).mockResolvedValue({
       filesize: 500 * 1024 * 1024,
