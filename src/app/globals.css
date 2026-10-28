@@ -2411,9 +2411,9 @@ input[type="checkbox"]:checked {
   cursor: pointer;
   transition: background 0.18s;
   flex-shrink: 0;
+  padding: 0;
 }
-.settings-toggle:after {
-  content: "";
+.settings-toggle > span {
   position: absolute;
   top: 2px;
   left: 2px;
@@ -2424,12 +2424,16 @@ input[type="checkbox"]:checked {
   box-shadow: 0 1px 3px #2432161f;
   transition: transform 0.18s;
 }
-.settings-toggle:checked {
+.settings-toggle[aria-checked="true"] {
   background: var(--green);
   border-color: var(--green);
 }
-.settings-toggle:checked:after {
+.settings-toggle[aria-checked="true"] > span {
   transform: translateX(18px);
+}
+.settings-toggle:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
 }
 .settings-toggle:disabled {
   opacity: 0.5;

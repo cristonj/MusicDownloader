@@ -982,8 +982,9 @@ export default function Downloader() {
                     <section>
                       <strong>Keep a song. Or the whole set.</strong>
                       <p>
-                        Download a track or select several for a ZIP. Up to 150
-                        MB per track and 450 MB per download.
+                        Download a track or select several for a ZIP. Large
+                        conversions depend on your device&apos;s available
+                        memory.
                       </p>
                     </section>
                   </div>
@@ -1016,7 +1017,7 @@ export default function Downloader() {
                 </p>
                 <div className="settings-section">
                   <h3>Discover</h3>
-                  <label className="settings-row">
+                  <div className="settings-row">
                     <span>
                       Service feeds
                       <small>
@@ -1024,17 +1025,18 @@ export default function Downloader() {
                         across all of them, under the link field.
                       </small>
                     </span>
-                    <input
-                      type="checkbox"
+                    <button
+                      type="button"
+                      role="switch"
                       className="settings-toggle"
                       aria-label="Show service feeds"
-                      checked={prefs.feed}
+                      aria-checked={prefs.feed}
                       disabled={locked}
-                      onChange={(event) =>
-                        library.changePrefs({ feed: event.target.checked })
-                      }
-                    />
-                  </label>
+                      onClick={() => library.changePrefs({ feed: !prefs.feed })}
+                    >
+                      <span aria-hidden="true" />
+                    </button>
+                  </div>
                   <p className="settings-note">
                     YouTube, Spotify, and Apple Music publish a chart anyone can
                     read; YouTube, Apple Music, and SoundCloud also publish a

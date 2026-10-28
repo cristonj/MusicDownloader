@@ -216,6 +216,7 @@ describe("private server endpoints", () => {
   });
   it("opens a source only when its signed audio endpoint is requested", async () => {
     vi.mocked(extract).mockResolvedValue({
+      filesize: 500 * 1024 * 1024,
       url: "https://r1.googlevideo.com/audio",
       ext: "m4a",
       protocol: "https",
@@ -241,6 +242,27 @@ describe("private server endpoints", () => {
       "media",
     );
     expect(ticket.headers).toEqual({ "User-Agent": "test" });
+  });
+  it("serves bounded chunks past the former per-file limit", async () => {
+    const start = 200 * 1024 * 1024,
+      total = 500 * 1024 * 1024;
+    vi.mocked(mediaFetch).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 206,
+        headers: {
+          "Content-Type": "audio/mp4",
+          "Content-Range": `bytes ${start}-${start + 2}/${total}`,
+        },
+      }),
+    );
+    const chunk = await mediaChunk(
+      { kind: "media", url: "https://r1.googlevideo.com/audio", headers: {} },
+      `bytes=${start}-${start + 2}`,
+    );
+    expect(chunk.total).toBe(total);
+    expect(chunk.start).toBe(start);
+    expect([...chunk.body]).toEqual([1, 2, 3]);
+    expect(chunk.more).toBe(true);
   });
   it("explains which upload a Spotify track matched and why", async () => {
     vi.mocked(extract).mockResolvedValue({

@@ -56,6 +56,19 @@ const call = (path: string, init: RequestInit = {}) =>
     },
   });
 describe("desktop helper", () => {
+  it("serves discovery searches on the local API", async () => {
+    const response = await call("/api/feed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "YouTube",
+        query: "An artist",
+        size: 3,
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).tracks[0].title).toBe("A song");
+  });
   it("allows only the paired app and token, with private-network preflight support", async () => {
     expect((await call("/health")).status).toBe(200);
     expect(

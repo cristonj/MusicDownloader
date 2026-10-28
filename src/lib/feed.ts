@@ -10,6 +10,7 @@ export const FEED_PROVIDERS: Provider[] = [
   "SoundCloud",
 ];
 export interface FeedRow {
+  transport?: "helper";
   title: string;
   fullTitle?: string;
   artist: string;
@@ -52,6 +53,7 @@ export async function loadFeed(
   size: number,
   signal: AbortSignal,
 ): Promise<FeedColumn> {
+  const transport = helperConnection() ? "helper" : undefined;
   const response = await sourceFetch(
     "/api/feed",
     {
@@ -60,7 +62,7 @@ export async function loadFeed(
       body: JSON.stringify({ provider, query, size }),
       signal,
     },
-    helperConnection() ? "helper" : undefined,
+    transport,
   );
   const result = await response.json().catch(() => null);
   if (!response.ok)
@@ -73,7 +75,10 @@ export async function loadFeed(
     provider,
     title:
       typeof result.title === "string" ? result.title.slice(0, 300) : provider,
-    rows: result.tracks.map(row),
+    rows: result.tracks.map((item: Record<string, unknown>) => ({
+      ...row(item),
+      transport,
+    })),
   };
 }
 // Rows from a chart of names carry no audio yet; the match runs when the
@@ -83,7 +88,7 @@ export async function importRow(
   provider: Provider,
   signal: AbortSignal,
 ): Promise<Track> {
-  const transport = helperConnection() ? ("helper" as const) : undefined;
+  const transport = entry.transport;
   let item: Record<string, unknown> = { ...entry };
   if (!entry.mediaUrl && entry.matchTicket) {
     const response = await sourceFetch(
