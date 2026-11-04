@@ -1,6 +1,6 @@
-import { accountRevision } from "../helper/accounts";
+import { accountRevision, accountArgs } from "../helper/accounts";
 vi.mock("../helper/accounts", () => ({
-  accountArgs: () => [],
+  accountArgs: vi.fn(() => []),
   accountRevision: vi.fn(() => 0),
 }));
 import { EventEmitter } from "node:events";
@@ -11,6 +11,7 @@ beforeEach(() => {
   vi.resetModules();
   spawn.mockReset();
   vi.mocked(accountRevision).mockReturnValue(0);
+  vi.mocked(accountArgs).mockReturnValue([]);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => vi.restoreAllMocks());
@@ -135,4 +136,24 @@ it("does not reuse an in-flight account lookup after account access changes", as
   await previous;
   await extract("https://youtube.com/watch?v=abcdefghijk", false);
   expect(spawn).toHaveBeenCalledTimes(2);
+});
+
+it("includes entitled Music formats for opted-in Google accounts after URL normalization", async () => {
+  vi.mocked(accountArgs).mockReturnValue([
+    "--cookies-from-browser",
+    "firefox",
+    "--no-cache-dir",
+  ]);
+  fakeResult({
+    title: "A song",
+    url: "https://r1.googlevideo.com/audio",
+    protocol: "https",
+    ext: "m4a",
+  });
+  const { extract } = await import("../src/server/extractor");
+  await extract("https://www.youtube.com/watch?v=abcdefghijk");
+  expect(spawn.mock.calls[0][1]).toContain(
+    "youtube:player_client=default,web_music",
+  );
+  expect(spawn.mock.calls[0][1]).toContain("--cookies-from-browser");
 });

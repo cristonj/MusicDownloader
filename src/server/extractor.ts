@@ -82,7 +82,13 @@ async function extractUncached(
   else args.push("--no-playlist");
   if (profile)
     args.push("--extractor-args", `youtube:player_client=${profile}`);
-  args.push(...accountArgs(url));
+  const credentials = accountArgs(url);
+  // Source URLs are normalized to www.youtube.com. Explicitly include the
+  // Music client for opted-in accounts so normalization cannot hide its
+  // entitled formats. Keep yt-dlp's account-aware defaults as well.
+  if (youtube && credentials.length && !profile)
+    args.push("--extractor-args", "youtube:player_client=default,web_music");
+  args.push(...credentials);
   args.push("--", url);
   return new Promise((resolve, reject) => {
     const process = spawn(binary, args, {

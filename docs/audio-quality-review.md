@@ -51,7 +51,7 @@ Peak protection measures the input, applies only necessary negative gain, then c
 
 Cookie access is opt-in and provider-scoped in use. The extraction tool reads browser cookies locally; the app stores only selected browser names. Session data is not uploaded to Netlify, and authenticated extraction disk caches are disabled. Disconnecting removes the preference and invalidates extraction caches, but does not sign the listener out of the service. The application never asks for service passwords.
 
-Google/YouTube Music and SoundCloud subscriptions can expose better entitled streams or original downloads. Availability is track- and account-dependent, and browser encryption may prevent session extraction. Spotify, Apple Music and Amazon Music authentication does not expose downloadable full-track audio through this implementation; those imports continue to use identified matched recordings. Protected/encrypted streams remain unsupported.
+Opted-in Google lookups include the YouTube Music client alongside the extractor’s account-aware defaults, even after shared links are normalized. Google/YouTube Music and SoundCloud subscriptions can expose better entitled streams or original downloads. Availability is track- and account-dependent, and browser encryption may prevent session extraction. Spotify, Apple Music and Amazon Music authentication does not expose downloadable full-track audio through this implementation; those imports continue to use identified matched recordings. Protected/encrypted streams remain unsupported.
 
 ## Operating limits and tradeoffs
 
@@ -66,4 +66,4 @@ Google/YouTube Music and SoundCloud subscriptions can expose better entitled str
 
 The application and desktop helper must be updated together for account access and the new extraction rules. The web app detects older helper protocol versions and prompts for an update. The desktop release workflow builds Windows (installer and portable), Mac and Linux packages and checks their bundled runtimes without an installed Node/Python toolchain. Account functionality still requires the listener's own supported browser and login.
 
-Local validation passed TypeScript checking, 72 unit/regression checks, 19 real browser tests, native FFmpeg comparisons, and the packaged Linux helper runtime check with an empty PATH. See the commit's checks for the final release status. No claim of perfection or guaranteed premium access is made: the release provides stronger defaults, observable measurements and concrete regression checks.
+Local validation passed TypeScript checking, 73 unit/regression checks, 19 real browser tests, native FFmpeg comparisons, and the packaged Linux helper runtime check with an empty PATH. See the commit's checks for the final release status. No claim of perfection or guaranteed premium access is made: the release provides stronger defaults, observable measurements and concrete regression checks.
