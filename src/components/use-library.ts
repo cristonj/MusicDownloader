@@ -1,4 +1,5 @@
 "use client";
+import { durationWarning } from "@/lib/quality";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bytesLabel,
@@ -117,7 +118,7 @@ export function useLibrary() {
     if (running.current) return;
     setPrefs((p) => ({ ...p, ...update }));
     if (
-      ["format", "bitrate", "sampleRate", "bitDepth"].some(
+      ["format", "bitrate", "sampleRate", "bitDepth", "preventClipping"].some(
         (key) => key in update,
       )
     )
@@ -125,6 +126,8 @@ export function useLibrary() {
         items.map((t) => ({
           ...t,
           output: undefined,
+          measurement: undefined,
+          qualityWarning: undefined,
           outputName: undefined,
           status: t.file || t.mediaUrl ? "ready" : "error",
           progress: 0,
@@ -259,7 +262,11 @@ export function useLibrary() {
               progress: value * (prefs.format === "original" ? 0.99 : 0.35),
             }),
           );
-          patch(track.id, { extension: data.extension });
+          patch(track.id, {
+            extension: data.extension,
+            quality: data.quality,
+            ...data.replacement,
+          });
           return data;
         } catch (error) {
           if (error instanceof HelperRequiredError) setHelperOpen(true);
@@ -293,6 +300,14 @@ export function useLibrary() {
               (value) => patch(track.id, { progress: 0.35 + value * 0.65 }),
               setStatus,
               fetched.remuxTo,
+              (measurement) =>
+                patch(track.id, {
+                  measurement,
+                  qualityWarning: durationWarning(
+                    track.duration,
+                    measurement.duration,
+                  ),
+                }),
             );
             if (signal.aborted)
               throw new DOMException("Cancelled", "AbortError");
@@ -446,5 +461,6 @@ export function useLibrary() {
       }
     },
     notify,
+    updateTrack: patch,
   };
 }

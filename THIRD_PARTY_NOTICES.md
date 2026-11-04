@@ -3,6 +3,7 @@
 MusicDownloader uses these third-party projects. Their own copyright and license terms apply:
 
 - [FFmpeg](https://ffmpeg.org/legal.html) and [ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm): the `@ffmpeg/core` build is GPL-2.0-or-later. It is served as a separate WebAssembly/JavaScript asset under `/ffmpeg/`; upstream source and build instructions for the pinned 0.12.10 core are at https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v0.12.10. Preserve its license notices when distributing these assets and comply with the upstream source-distribution requirements.
+- [libopus-wasm](https://github.com/openclaw/libopus-wasm) 0.4.1: MIT, including libopus 1.6.1 under its BSD license. The ESM, embedded WASM and upstream notices are served under `/opus/`; upstream source/build instructions and license texts are included in the npm distribution.
 - [fflate](https://github.com/101arrowz/fflate): MIT.
 - [Lucide](https://lucide.dev/license): ISC.
 - [DM Sans](https://github.com/googlefonts/dm-fonts) and [Manrope](https://github.com/sharanda/manrope): SIL Open Font License 1.1, bundled by Fontsource.

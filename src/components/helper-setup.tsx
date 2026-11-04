@@ -1,4 +1,5 @@
 "use client";
+import Accounts from "./accounts";
 import { useEffect, useState } from "react";
 import { Check, Download, LoaderCircle, X } from "lucide-react";
 import {
@@ -214,6 +215,7 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
             <Check size={15} />
           )}
         </button>
+        {ready && <Accounts />}
         <button
           className="text-button"
           onClick={async () => {

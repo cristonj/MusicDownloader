@@ -42,7 +42,17 @@ describe("export decisions", () => {
         bitDepth: "24",
         sampleRate: "96000",
       }),
-    ).toEqual(["-map", "0:a:0", "-vn", "-c:a", "pcm_s24le", "-ar", "96000"]);
+    ).toEqual([
+      "-map",
+      "0:a:0",
+      "-vn",
+      "-c:a",
+      "pcm_s24le",
+      "-af",
+      "aresample=dither_method=triangular",
+      "-ar",
+      "96000",
+    ]);
     expect(
       conversionArgs({ ...defaults, format: "opus", sampleRate: "96000" }),
     ).not.toContain("96000");

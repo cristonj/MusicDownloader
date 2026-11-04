@@ -11,6 +11,8 @@ import { POST as lookup } from "../src/app/api/lookup/route";
 import { GET as audio } from "../src/app/api/audio/route";
 import { GET as media } from "../src/app/api/media/route";
 
+import { localAccounts, saveLocalAccounts } from "./accounts";
+import { clearExtractions } from "../src/server/extractor";
 export const HELPER_PORT = 45821;
 export function startHelper(options: {
   token: string;
@@ -78,9 +80,31 @@ export function startHelper(options: {
       if (url.pathname === "/health") {
         respond(200, {
           app: "MusicDownloader",
-          version: 5,
+          version: 6,
           ...options.state(),
         });
+        return;
+      }
+      if (url.pathname === "/accounts" && req.method === "GET") {
+        respond(200, { accounts: localAccounts() });
+        return;
+      }
+      if (url.pathname === "/accounts" && req.method === "POST") {
+        try {
+          let body = "";
+          for await (const chunk of req) {
+            body += chunk;
+            if (body.length > 2048) throw new Error("Request too large.");
+          }
+          const accounts = saveLocalAccounts(JSON.parse(body));
+          clearExtractions();
+          respond(200, { accounts });
+        } catch {
+          respond(400, {
+            detail:
+              "Could not save account settings. Choose a supported browser.",
+          });
+        }
         return;
       }
       if (url.pathname === "/quit" && req.method === "POST") {

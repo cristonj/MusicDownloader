@@ -18,3 +18,5 @@ next-env.d.ts
 public/index.html
 .helper-build/
 helper-dist/
+
+public/opus/

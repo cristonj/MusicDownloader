@@ -12,3 +12,5 @@ playwright-report
 .netlify
 .helper-build
 helper-dist
+
+public/opus/

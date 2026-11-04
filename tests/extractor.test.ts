@@ -1,3 +1,8 @@
+import { accountRevision } from "../helper/accounts";
+vi.mock("../helper/accounts", () => ({
+  accountArgs: () => [],
+  accountRevision: vi.fn(() => 0),
+}));
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const spawn = vi.hoisted(() => vi.fn());
@@ -5,6 +10,7 @@ vi.mock("node:child_process", () => ({ spawn }));
 beforeEach(() => {
   vi.resetModules();
   spawn.mockReset();
+  vi.mocked(accountRevision).mockReturnValue(0);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => vi.restoreAllMocks());
@@ -42,6 +48,9 @@ describe("fast source lookups", () => {
     expect(args).toContain("--ignore-config");
     expect(args).toContain("--use-extractors");
     expect(args).toContain("-f");
+    expect(args[args.indexOf("-f") + 1]).toBe(
+      "bestaudio[format_id!*=preview]/best[format_id!*=preview]",
+    );
   });
   it("does not mistake a playlist for a single audio source", async () => {
     fakeResult({ entries: [{ title: "Song", id: "abcdefghijk" }] });
@@ -109,4 +118,21 @@ it("does not mislabel a runtime failure as a private track or retry a broken eng
     extract("https://www.youtube.com/watch?v=xKJtIjB3pAI"),
   ).rejects.toThrow("download engine could not run");
   expect(spawn).toHaveBeenCalledTimes(1);
+});
+
+it("does not reuse an in-flight account lookup after account access changes", async () => {
+  let revision = 0;
+  vi.mocked(accountRevision).mockImplementation(() => revision);
+  fakeResult({
+    title: "A song",
+    url: "https://r1.googlevideo.com/audio",
+    protocol: "https",
+    ext: "m4a",
+  });
+  const { extract } = await import("../src/server/extractor");
+  const previous = extract("https://youtube.com/watch?v=abcdefghijk", true);
+  revision = 1;
+  await previous;
+  await extract("https://youtube.com/watch?v=abcdefghijk", false);
+  expect(spawn).toHaveBeenCalledTimes(2);
 });

@@ -22,9 +22,13 @@ export async function GET(request: Request) {
     );
     if (new URL(request.url).searchParams.has("fresh"))
       invalidateExtraction(ticket.url);
-    return Response.json(await audioManifest(ticket.url, deadline), {
-      headers: privateHeaders,
-    });
+    const manifest = await audioManifest(ticket.url, deadline);
+    return Response.json(
+      { ...manifest, quality: { ...manifest.quality, sourceUrl: ticket.url } },
+      {
+        headers: privateHeaders,
+      },
+    );
   } catch (error) {
     return errorResponse(
       deadline.aborted && !request.signal.aborted

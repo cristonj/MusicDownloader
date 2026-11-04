@@ -48,16 +48,113 @@ function releaseEngine(engine: FFmpeg, broken: boolean) {
   if (broken) engine.terminate();
   else idle.push(engine);
 }
-// Re-encoding is the slow part; when the source already uses the requested
-// codec at its own sample rate, copying the audio is near-instant.
-function copiesAs(extension: string, prefs: Preferences) {
-  if (prefs.sampleRate !== "source") return false;
-  const sources: Partial<Record<Preferences["format"], string[]>> = {
-    m4a: ["m4a", "mp4", "aac"],
-    opus: ["webm", "opus"],
-    mp3: ["mp3"],
+import {
+  parseMeasurement,
+  headroomAdjustment,
+  type AudioMeasurement,
+} from "./quality";
+
+async function measureFile(
+  ffmpeg: FFmpeg,
+  file: string,
+  bytes: number,
+): Promise<AudioMeasurement> {
+  let log = "";
+  const listener = ({ message }: { message: string }) => {
+    log += message + "\n";
   };
-  return sources[prefs.format]?.includes(extension.toLowerCase()) ?? false;
+  ffmpeg.on("log", listener);
+  try {
+    const code = await ffmpeg.exec([
+      "-hide_banner",
+      "-nostats",
+      "-i",
+      file,
+      "-map",
+      "0:a:0",
+      "-vn",
+      "-af",
+      "ebur128=peak=true:framelog=verbose,astats=metadata=0:reset=0",
+      "-f",
+      "null",
+      "-",
+    ]);
+    if (code !== 0) throw new Error("This audio could not be measured.");
+    return parseMeasurement(log, bytes);
+  } finally {
+    ffmpeg.off("log", listener);
+  }
+}
+export async function analyzeAudio(
+  input: Blob,
+  extension: string,
+  signal: AbortSignal,
+): Promise<AudioMeasurement> {
+  const ffmpeg = await getEngine(signal, () => {});
+  let broken = false;
+  const abort = () => ffmpeg.terminate();
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+    await ffmpeg.writeFile(
+      `measure.${extension}`,
+      new Uint8Array(await input.arrayBuffer()),
+    );
+    return await measureFile(ffmpeg, `measure.${extension}`, input.size);
+  } catch (error) {
+    broken = true;
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abort);
+    await ffmpeg.deleteFile(`measure.${extension}`).catch(() => {});
+    releaseEngine(ffmpeg, broken);
+  }
+}
+async function encodeOpus(
+  pcm: Uint8Array,
+  channels: 1 | 2,
+  track: Track,
+  bitrate: number,
+  signal: AbortSignal,
+  onProgress: (progress: number) => void,
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./opus.worker.ts", import.meta.url));
+    const cleanup = () => {
+      worker.terminate();
+      signal.removeEventListener("abort", abort);
+    };
+    const abort = () => {
+      cleanup();
+      reject(new DOMException("Cancelled", "AbortError"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    worker.onmessage = ({
+      data,
+    }: MessageEvent<{ blob?: Blob; error?: string; progress?: number }>) => {
+      if (data.progress !== undefined) onProgress(data.progress);
+      if (data.blob || data.error) {
+        cleanup();
+        data.blob ? resolve(data.blob) : reject(new Error(data.error));
+      }
+    };
+    worker.onerror = () => {
+      cleanup();
+      reject(new Error("The Opus encoder stopped. Try again."));
+    };
+    const floats = new Float32Array(new Uint8Array(pcm).buffer);
+    worker.postMessage(
+      {
+        pcm: floats,
+        channels,
+        bitrate,
+        title: track.title,
+        artist: track.artist,
+      },
+      [floats.buffer],
+    );
+    if (signal.aborted) abort();
+  });
 }
 export async function convertAudio(
   input: Blob,
@@ -67,6 +164,7 @@ export async function convertAudio(
   onProgress: (progress: number) => void,
   onStatus: (message: string) => void,
   remuxTo?: string,
+  onMeasurement?: (value: AudioMeasurement) => void,
 ): Promise<Blob> {
   if (prefs.format === "original" && !remuxTo) return input;
   const ffmpeg = await getEngine(signal, onStatus);
@@ -84,31 +182,130 @@ export async function convertAudio(
       inputName,
       new Uint8Array(await input.arrayBuffer()),
     );
-    const code = await ffmpeg.exec([
-      "-i",
-      inputName,
-      ...(prefs.format === "original" || copiesAs(track.extension, prefs)
+    const original = prefs.format === "original";
+    const protect = !original && prefs.preventClipping;
+    let gain = protect
+      ? headroomAdjustment(
+          (await measureFile(ffmpeg, inputName, input.size)).truePeakDbtp,
+          -1.2,
+        )
+      : 0;
+    let result: Uint8Array<ArrayBuffer> | undefined;
+    let measured: AudioMeasurement | undefined;
+    for (let pass = 0; pass < (protect ? 3 : 1); pass++) {
+      const filters = [
+        ...(gain < 0 ? [`volume=${gain.toFixed(6)}dB:precision=double`] : []),
+        ...(["flac", "wav", "aiff"].includes(outputFormat)
+          ? ["aresample=dither_method=triangular"]
+          : []),
+      ];
+      let args = original
         ? ["-map", "0:a:0", "-vn", "-c:a", "copy"]
-        : conversionArgs(prefs)),
-      "-map_metadata",
-      "0",
-      ...(track.provider === "Local file"
-        ? []
-        : [
-            "-metadata",
-            `title=${track.title}`,
-            ...(track.artist ? ["-metadata", `artist=${track.artist}`] : []),
-          ]),
-      outputName,
-    ]);
-    if (code !== 0) {
-      throw new Error(
-        "This audio could not be converted. Try Original or another format.",
-      );
+        : conversionArgs(prefs);
+      // Install the combined filter once (volume must precede quantization).
+      const af = args.indexOf("-af");
+      if (af >= 0) args.splice(af, 2);
+      if (!original && filters.length) args.push("-af", filters.join(","));
+      const metadata = [
+        "-map_metadata",
+        "0",
+        ...(track.provider === "Local file"
+          ? []
+          : [
+              "-metadata",
+              `title=${track.title}`,
+              ...(track.artist ? ["-metadata", `artist=${track.artist}`] : []),
+            ]),
+      ];
+      if (!original && outputFormat === "opus") {
+        // Decode/resample in float, then encode with modern libopus in a
+        // separate worker. No unstable FFmpeg libopus/native-Opus workaround.
+        const inputInfo = await measureFile(ffmpeg, inputName, input.size);
+        if (inputInfo.channels && inputInfo.channels > 2)
+          throw new Error(
+            "Opus export supports mono or stereo. Choose Original to preserve surround audio.",
+          );
+        const channels = inputInfo.channels === 1 ? 1 : 2;
+        const code = await ffmpeg.exec([
+          "-y",
+          "-i",
+          inputName,
+          "-map",
+          "0:a:0",
+          "-vn",
+          ...(gain < 0
+            ? ["-af", `volume=${gain.toFixed(6)}dB:precision=double`]
+            : []),
+          "-ar",
+          "48000",
+          "-ac",
+          String(channels),
+          "-c:a",
+          "pcm_f32le",
+          "-f",
+          "f32le",
+          "opus.pcm",
+        ]);
+        if (code !== 0)
+          throw new Error("This audio could not be decoded for Opus.");
+        const pcm = await ffmpeg.readFile("opus.pcm");
+        if (typeof pcm === "string") throw new Error("Invalid decoded audio.");
+        const blob = await encodeOpus(
+          pcm,
+          channels,
+          track,
+          +prefs.bitrate * 1000,
+          signal,
+          onProgress,
+        );
+        await ffmpeg.deleteFile("opus.pcm");
+        result = new Uint8Array(await blob.arrayBuffer());
+        await ffmpeg.writeFile(outputName, new Uint8Array(result));
+      } else {
+        const code = await ffmpeg.exec([
+          "-y",
+          "-i",
+          inputName,
+          ...args,
+          ...metadata,
+          outputName,
+        ]);
+        if (code !== 0)
+          throw new Error(
+            "This audio could not be converted. Try Original or another format.",
+          );
+        const bytes = await ffmpeg.readFile(outputName);
+        if (typeof bytes === "string")
+          throw new Error("The audio engine returned invalid output.");
+        result = new Uint8Array(bytes);
+      }
+      // Original remuxes remain untouched and fast. Conversions are measured
+      // after encoding; protection is verified against the actual output.
+      if (!original)
+        measured = await measureFile(ffmpeg, outputName, result.length);
+      if (
+        !protect ||
+        measured?.truePeakDbtp === -Infinity ||
+        (Number.isFinite(measured?.truePeakDbtp) &&
+          measured!.truePeakDbtp! <= -1)
+      )
+        break;
+      if (!Number.isFinite(measured?.truePeakDbtp))
+        throw new Error(
+          "Could not verify peak protection. Choose Original or turn protection off.",
+        );
+      gain += headroomAdjustment(measured!.truePeakDbtp, -1.2);
     }
-    const result = await ffmpeg.readFile(outputName);
-    if (typeof result === "string")
-      throw new Error("The audio engine returned invalid output.");
+    if (
+      protect &&
+      measured?.truePeakDbtp !== undefined &&
+      measured.truePeakDbtp > -1
+    )
+      throw new Error(
+        "Peak protection could not reach its target. Choose Original or another format.",
+      );
+    if (measured) onMeasurement?.({ ...measured, attenuationDb: gain });
+    if (!result) throw new Error("The audio engine returned no audio.");
     const types: Record<string, string> = {
       mp3: "audio/mpeg",
       m4a: "audio/mp4",
@@ -136,6 +333,7 @@ export async function convertAudio(
     ffmpeg.off("progress", listener);
     await ffmpeg.deleteFile(inputName).catch(() => {});
     await ffmpeg.deleteFile(outputName).catch(() => {});
+    await ffmpeg.deleteFile("opus.pcm").catch(() => {});
     releaseEngine(ffmpeg, broken);
   }
 }

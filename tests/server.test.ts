@@ -761,8 +761,9 @@ describe("short-form sources", () => {
       expect(() => allowedSource(url)).toThrow();
   });
   it("sends an IP-blocked post to the listener's own connection", async () => {
-    const { extractionFailure } =
-      await import("../src/server/extraction-error");
+    const { extractionFailure } = await import(
+      "../src/server/extraction-error"
+    );
     const failure = extractionFailure(
       "ERROR: [TikTok] 7016181462140628225: Your IP address is blocked from accessing this post",
       false,
@@ -1055,13 +1056,30 @@ describe("bounded audio transport", () => {
 });
 describe("extraction failures", () => {
   it("explains DRM-protected tracks", async () => {
-    const { extractionFailure } =
-      await import("../src/server/extraction-error");
+    const { extractionFailure } = await import(
+      "../src/server/extraction-error"
+    );
     expect(
       extractionFailure(
         "ERROR: [soundcloud] 1: This video is DRM protected",
         false,
       ).message,
     ).toMatch(/DRM-protected/);
+  });
+});
+
+describe("source quality selection", () => {
+  it("ranks HLS variants when BANDWIDTH is the first attribute", async () => {
+    vi.mocked(mediaFetch)
+      .mockResolvedValueOnce(
+        new Response(
+          '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=96000,CODECS="mp4a.40.2"\nlow.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=256000,CODECS="mp4a.40.2"\nhigh.m3u8',
+        ),
+      )
+      .mockResolvedValueOnce(new Response("#EXTM3U\nfull.ts\n#EXT-X-ENDLIST"));
+    await hlsManifest("https://cf-media.sndcdn.com/master.m3u8", {});
+    expect(vi.mocked(mediaFetch).mock.calls[1][0]).toBe(
+      "https://cf-media.sndcdn.com/high.m3u8",
+    );
   });
 });

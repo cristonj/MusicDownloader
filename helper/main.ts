@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { spawn, execFileSync } from "node:child_process";
 import { prepareMediaTools } from "../scripts/media-tools.mjs";
 import { startHelper, HELPER_PORT } from "./server";
+import { enableLocalAccounts } from "./accounts";
 const APP = "https://musicdownloaderapp.netlify.app";
 async function main() {
   // pkg's embedded Node runtime doubles as yt-dlp's JavaScript engine. Users
@@ -56,6 +57,7 @@ async function main() {
   const home = join(homedir(), ".musicdownloader");
   await mkdir(home, { recursive: true, mode: 0o700 });
   process.chdir(home);
+  enableLocalAccounts();
   const token = randomBytes(32).toString("base64url");
   let state: { ready: boolean; error?: string } = { ready: false };
   try {

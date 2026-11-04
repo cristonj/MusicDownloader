@@ -13,7 +13,9 @@ import {
 } from "./security";
 import { mediaFetch } from "./upstream";
 export const CHUNK_BYTES = 2 * 1024 * 1024;
+import type { SourceQuality } from "@/lib/quality";
 export interface AudioManifest {
+  quality?: SourceQuality;
   extension: string;
   remuxTo?: string;
   parts: string[];
@@ -67,7 +69,9 @@ export async function hlsManifest(
       )
         variants.push({
           url: new URL(lines[i + 1], base).href,
-          bandwidth: Number(lines[i].match(/(?:^|,)BANDWIDTH=(\d+)/)?.[1] || 0),
+          bandwidth: Number(
+            lines[i].match(/(?:[:,])BANDWIDTH=(\d+)/)?.[1] || 0,
+          ),
         });
     variants.sort((a, b) => b.bandwidth - a.bandwidth);
     if (!variants[0]) throw new HttpError(422, "No audio stream was found.");
@@ -201,6 +205,16 @@ async function playableManifest(
   await response.body?.cancel();
   if (/text\/|application\/(json|xml)/i.test(mime))
     throw new HttpError(422, "The source returned a page instead of audio.");
+  manifest.quality = {
+    codec: info.acodec && info.acodec !== "none" ? info.acodec : undefined,
+    bitrateKbps: info.abr,
+    sampleRate: info.asr,
+    channels: info.audio_channels,
+    bitDepth: info.bits_per_raw_sample,
+    duration: info.duration,
+    format: info.format_id,
+    note: info.format_note,
+  };
   return manifest;
 }
 export async function audioManifest(

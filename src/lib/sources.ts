@@ -185,6 +185,11 @@ export async function resolveLink(
     throw new HelperRequiredError(
       "Connect the desktop helper to open this link from your computer.",
     );
+  if (
+    !response.ok &&
+    /requires an account|selected browser session/i.test(result?.detail || "")
+  )
+    throw new HelperRequiredError(result.detail);
   if (!response.ok)
     throw new Error(
       result?.detail || "This source could not be opened. Try another link.",
@@ -276,6 +281,8 @@ export interface AudioInput {
   blob: Blob;
   extension: string;
   remuxTo?: string;
+  quality?: import("./quality").SourceQuality;
+  replacement?: Partial<Track>;
 }
 // A source can refuse audio only once the stream is opened (DRM, removal,
 // region or bot blocks, dead CDN links). Retry the source with a fresh
@@ -322,7 +329,9 @@ export async function fetchAudio(
     if (
       signal.aborted ||
       !track.fallbackTicket ||
-      /memory|limit|exceeds/i.test(message(failure))
+      /memory|limit|exceeds|selected browser session|requires an account/i.test(
+        message(failure),
+      )
     )
       throw failure;
     const response = await sourceFetch(
@@ -348,12 +357,23 @@ export async function fetchAudio(
       );
     tried.push(found.sourceUrl);
     try {
-      return await attempt({
+      const downloaded = await attempt({
         ...track,
         mediaUrl: found.mediaUrl,
         sourceUrl: found.sourceUrl,
         extension: "m4a",
       });
+      return {
+        ...downloaded,
+        replacement: {
+          sourceUrl: found.sourceUrl,
+          matchedTitle: found.matchedTitle,
+          matchedChannel: found.matchedChannel,
+          matchReason: found.matchReason,
+          matchConfidence: found.matchConfidence,
+          replacement: true,
+        },
+      };
     } catch (error) {
       failure = error;
     }
@@ -413,6 +433,11 @@ async function fetchSourceAudio(
     throw new HelperRequiredError(
       "Connect the desktop helper to download from your computer.",
     );
+  if (
+    !response.ok &&
+    /requires an account|selected browser session/i.test(manifest?.detail || "")
+  )
+    throw new HelperRequiredError(manifest.detail);
   if (!response.ok)
     throw new Error(
       manifest?.detail || "This audio is unavailable. Re-import the source.",
@@ -555,6 +580,7 @@ async function fetchSourceAudio(
   return {
     blob: new Blob(pieces.flat()),
     extension: manifest.extension,
+    quality: manifest.quality,
     remuxTo: ["m4a", "mp3", "opus", "ogg"].includes(manifest.remuxTo)
       ? manifest.remuxTo
       : undefined,

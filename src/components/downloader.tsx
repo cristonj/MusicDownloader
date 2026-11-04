@@ -32,6 +32,7 @@ import {
   type Track,
 } from "@/lib/model";
 import { fetchAudio } from "@/lib/sources";
+import AudioDetails from "./audio-details";
 import Feed from "./feed";
 import HelperSetup from "./helper-setup";
 import { useLibrary } from "./use-library";
@@ -233,7 +234,9 @@ export default function Downloader() {
       ? "Source quality"
       : isLossless(prefs.format)
         ? `${prefs.bitDepth}-bit`
-        : `${prefs.bitrate} kbps`;
+        : prefs.format === "ogg"
+          ? "Vorbis VBR"
+          : `${prefs.bitrate} kbps`;
 
   const stopAudio = () => {
     previewLoad.current?.abort();
@@ -573,7 +576,14 @@ export default function Downloader() {
                   >
                     {["128", "192", "256", "320"].map((value) => (
                       <option key={value} value={value}>
-                        {value} kbps
+                        {prefs.format === "ogg"
+                          ? {
+                              "128": "Standard VBR",
+                              "192": "High VBR",
+                              "256": "Higher VBR",
+                              "320": "Maximum VBR",
+                            }[value as "128" | "192" | "256" | "320"]
+                          : `${value} kbps`}
                       </option>
                     ))}
                   </select>
@@ -766,6 +776,13 @@ export default function Downloader() {
                             </a>
                           )
                         )}
+                        <AudioDetails
+                          track={track}
+                          disabled={locked}
+                          update={(value) =>
+                            library.updateTrack(track.id, value)
+                          }
+                        />
                         {track.error && (
                           <span className="track-error-message">
                             {track.error}
@@ -1049,7 +1066,7 @@ export default function Downloader() {
                   <label className="settings-row">
                     <span>
                       Sample rate
-                      <small>Source preserves the original rate.</small>
+                      <small>Preserve the source rate where the format supports it.</small>
                     </span>
                     <select
                       aria-label="Sample rate"
@@ -1071,6 +1088,26 @@ export default function Downloader() {
                       <option value="48000">48 kHz</option>
                       <option value="96000">96 kHz</option>
                     </select>
+                  </label>
+                  <label className="settings-row">
+                    <span>
+                      Protect conversion peaks
+                      <small>
+                        Measure, then reduce gain only if needed. Target −1
+                        dBTP. Original stays untouched.
+                      </small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      aria-label="Protect conversion peaks"
+                      checked={Boolean(prefs.preventClipping)}
+                      disabled={locked || prefs.format === "original"}
+                      onChange={(e) =>
+                        library.changePrefs({
+                          preventClipping: e.target.checked,
+                        })
+                      }
+                    />
                   </label>
                   <p className="settings-note">
                     Converting to lossless or increasing quality does not

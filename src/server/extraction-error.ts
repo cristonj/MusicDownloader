@@ -17,6 +17,17 @@ export function extractionFailure(
   stderr: string,
   youtube: boolean,
 ): ExtractionError {
+  if (
+    /could not (?:copy|find|decrypt).*cookie|failed to decrypt|cookie database|keyring|keychain|DPAPI|cookies? (?:database|file)|browser.*not found/i.test(
+      stderr,
+    )
+  )
+    return new ExtractionError(
+      "ACCOUNT_ACCESS",
+      "Could not read the selected browser session. Sign in using its default profile, close that browser, and try again. Allow the system keychain prompt, or select Firefox in Desktop helper → Connect accounts.",
+      false,
+      422,
+    );
   const source = youtube ? "YouTube" : "The source";
   if (/private video|video is private|this video is private/i.test(stderr))
     return new ExtractionError(
@@ -72,7 +83,7 @@ export function extractionFailure(
   )
     return new ExtractionError(
       "LOGIN_REQUIRED",
-      "This track requires a signed-in account at the source.",
+      "This track requires an account. Open Desktop helper → Connect accounts, sign in to the source, and enable access.",
       false,
       422,
     );

@@ -28,10 +28,10 @@ test("local conversion creates real audio in every format without uploading", as
     mp3: "mp3",
     m4a: "aac",
     flac: "flac",
-    wav: "pcm_s16le",
+    wav: "pcm_s24le",
     ogg: "vorbis",
     opus: "opus",
-    aiff: "pcm_s16be",
+    aiff: "pcm_s24be",
   };
   for (const [format, codec] of Object.entries(formats)) {
     await page.getByLabel("Output format").selectOption(format);
@@ -544,6 +544,37 @@ test("Original HLS audio is assembled and remuxed locally without transcoding", 
   );
   expect(probe.streams[0].codec_name).toBe("aac");
   expect(Number(probe.streams[0].duration)).toBeGreaterThan(4.9);
+  const sourcePackets = execFileSync(
+    "ffmpeg",
+    [
+      "-v",
+      "error",
+      "-i",
+      "pipe:0",
+      "-map",
+      "0:a:0",
+      "-c:a",
+      "copy",
+      "-f",
+      "adts",
+      "pipe:1",
+    ],
+    { input: stream },
+  );
+  const outputPackets = execFileSync("ffmpeg", [
+    "-v",
+    "error",
+    "-i",
+    (await result.path())!,
+    "-map",
+    "0:a:0",
+    "-c:a",
+    "copy",
+    "-f",
+    "adts",
+    "pipe:1",
+  ]);
+  expect(outputPackets.equals(sourcePackets)).toBe(true);
 });
 
 test("desktop helper wizard pairs and downloads without using the hosted source API", async ({
@@ -573,10 +604,19 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     expect(request.headers().authorization).toBe(`Bearer ${token}`);
     if (path === "/health")
       await route.fulfill({
-        json: { app: "MusicDownloader", version: 5, ready: true },
+        json: { app: "MusicDownloader", version: 6, ready: true },
         headers,
       });
-    else if (path === "/api/feed") {
+    else if (path === "/accounts") {
+      if (request.method() === "POST")
+        expect(request.postDataJSON()).toEqual({ youtube: "firefox" });
+      await route.fulfill({
+        json: {
+          accounts: request.method() === "POST" ? { youtube: "firefox" } : {},
+        },
+        headers,
+      });
+    } else if (path === "/api/feed") {
       localFeedRequests++;
       const { provider } = request.postDataJSON();
       await route.fulfill({
@@ -630,6 +670,21 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
   await expect(
     page.getByRole("link", { name: "Download installer" }),
   ).toHaveAttribute("href", /MusicDownloader-Helper-Windows-Setup.exe$/);
+  await page
+    .getByText("Connect accounts for better sources", { exact: true })
+    .click();
+  await page.getByLabel("Account browser").selectOption("firefox");
+  const google = page.locator(".account-row").first();
+  await expect(google.getByRole("link")).toHaveAttribute(
+    "href",
+    "https://music.youtube.com/",
+  );
+  await google
+    .getByRole("button", { name: "Use this account", exact: true })
+    .click();
+  await expect(
+    google.getByRole("button", { name: "Disconnect firefox", exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await page
     .getByLabel("Music or playlist link")
@@ -653,4 +708,237 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     page.getByText("YouTube local discovery", { exact: true }),
   ).toBeVisible();
   expect(localFeedRequests).toBe(3);
+});
+
+test("audio meters agree with native FFmpeg and optional protection limits true peaks", async ({
+  page,
+}) => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "music-peaks-"));
+  try {
+    const input = join(directory, "Hot.wav");
+    // Reconstructed peaks exceed full scale despite stored samples fitting.
+    execFileSync("ffmpeg", [
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "aevalsrc=1.3*sin(2*PI*11025*t+PI/4):s=44100:d=5",
+      "-c:a",
+      "pcm_f32le",
+      input,
+    ]);
+    await page.goto("/");
+    await page.locator("input[type=file]").setInputFiles(input);
+    await page.locator(".audio-details summary").click();
+    await page
+      .getByRole("button", { name: "Measure audio", exact: true })
+      .click();
+    const { spawnSync } = await import("node:child_process");
+    const inputReport = spawnSync(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        input,
+        "-af",
+        "ebur128=peak=true:framelog=verbose",
+        "-f",
+        "null",
+        "-",
+      ],
+      { encoding: "utf8" },
+    ).stderr;
+    const truePeak = Number(
+      [...inputReport.matchAll(/Peak:\s*([\d.-]+) dBFS/g)].at(-1)![1],
+    );
+    expect(truePeak).toBeGreaterThan(0);
+    await expect(page.locator(".audio-details")).toContainText(
+      `${truePeak.toFixed(1)} dBTP`,
+    );
+    const lufs = Number(
+      [...inputReport.matchAll(/\bI:\s*([\d.-]+) LUFS/g)].at(-1)![1],
+    );
+    await expect(page.locator(".audio-details")).toContainText(
+      `${lufs.toFixed(1)} LUFS`,
+    );
+    await page.getByLabel("Output format").selectOption("wav");
+    await page
+      .getByRole("button", { name: "Preferences", exact: true })
+      .click();
+    await page.getByLabel("Protect conversion peaks").check();
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    const waiting = page.waitForEvent("download");
+    await page
+      .getByRole("button", { name: "Download track", exact: true })
+      .click();
+    const download = await waiting;
+    const outputReport = spawnSync(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        (await download.path())!,
+        "-af",
+        "ebur128=peak=true:framelog=verbose",
+        "-f",
+        "null",
+        "-",
+      ],
+      { encoding: "utf8" },
+    ).stderr;
+    const outputPeak = Number(
+      [...outputReport.matchAll(/Peak:\s*([\d.-]+) dBFS/g)].at(-1)![1],
+    );
+    expect(outputPeak).toBeLessThanOrEqual(-1);
+    expect(outputPeak).toBeGreaterThan(-1.5);
+    console.log("Peak verification (dBTP)", {
+      source: truePeak,
+      output: outputPeak,
+    });
+    await expect(page.locator(".audio-details")).toContainText(
+      "Headroom adjustment",
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("stereo Opus uses libopus with exact decoded length and preserves channel fidelity", async ({
+  page,
+}) => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "music-opus-"));
+  try {
+    const input = join(directory, "Stereo.wav");
+    execFileSync("ffmpeg", [
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "aevalsrc=0.7*sin(2*PI*440*t)+0.1*sin(2*PI*7900*t)|0.5*sin(2*PI*660*t)+0.1*sin(2*PI*5000*t):s=48000:d=5",
+      "-c:a",
+      "pcm_f32le",
+      input,
+    ]);
+    await page.goto("/");
+    await page.locator("input[type=file]").setInputFiles(input);
+    await page.getByLabel("Output format").selectOption("opus");
+    const waiting = page.waitForEvent("download");
+    await page
+      .getByRole("button", { name: "Download track", exact: true })
+      .click();
+    const result = await waiting,
+      path = (await result.path())!;
+    const decoded = execFileSync(
+      "ffmpeg",
+      ["-v", "error", "-i", path, "-f", "f32le", "-c:a", "pcm_f32le", "-"],
+      { maxBuffer: 8 * 1024 * 1024 },
+    );
+    const reference = execFileSync(
+      "ffmpeg",
+      ["-v", "error", "-i", input, "-f", "f32le", "-c:a", "pcm_f32le", "-"],
+      { maxBuffer: 8 * 1024 * 1024 },
+    );
+    expect(decoded.length).toBe(reference.length);
+    const values = new Float32Array(
+      decoded.buffer.slice(
+        decoded.byteOffset,
+        decoded.byteOffset + decoded.byteLength,
+      ),
+    );
+    const original = new Float32Array(
+      reference.buffer.slice(
+        reference.byteOffset,
+        reference.byteOffset + reference.byteLength,
+      ),
+    );
+    for (let channel = 0; channel < 2; channel++) {
+      let signal = 0,
+        error = 0;
+      // Exclude codec start/end transients from the fidelity comparison.
+      for (let i = 4800 * 2 + channel; i < values.length - 4800 * 2; i += 2) {
+        signal += original[i] ** 2;
+        error += (values[i] - original[i]) ** 2;
+      }
+      const snr = 10 * Math.log10(signal / error);
+      console.log("Opus fidelity check", { channel, snrDb: snr });
+      expect(snr).toBeGreaterThan(25);
+    }
+    const probe = JSON.parse(
+      execFileSync(
+        "ffprobe",
+        ["-v", "error", "-show_streams", "-of", "json", path],
+        { encoding: "utf8" },
+      ),
+    );
+    expect(probe.streams[0]).toMatchObject({
+      codec_name: "opus",
+      sample_rate: "48000",
+      channels: 2,
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("same-format MP3 exports honor bitrate changes instead of silently copying", async ({
+  page,
+}) => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "music-bitrate-"));
+  try {
+    const input = join(directory, "Low.mp3");
+    execFileSync("ffmpeg", [
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:duration=3",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "128k",
+      input,
+    ]);
+    await page.goto("/");
+    await page.locator("input[type=file]").setInputFiles(input);
+    await page.getByLabel("Output format").selectOption("mp3");
+    for (const bitrate of ["320", "192"]) {
+      await page.getByLabel("Audio bitrate").selectOption(bitrate);
+      const waiting = page.waitForEvent("download");
+      await page
+        .getByRole("button", { name: "Download track", exact: true })
+        .click();
+      const result = await waiting;
+      const probe = JSON.parse(
+        execFileSync(
+          "ffprobe",
+          [
+            "-v",
+            "error",
+            "-show_streams",
+            "-of",
+            "json",
+            (await result.path())!,
+          ],
+          { encoding: "utf8" },
+        ),
+      );
+      expect(Number(probe.streams[0].bit_rate)).toBe(+bitrate * 1000);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

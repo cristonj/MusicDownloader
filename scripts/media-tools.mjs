@@ -17,7 +17,7 @@ export async function prepareMediaTools(directory, options = {}) {
   }
   // Deployment archives must remain readable by the hosting runtime user.
   await chmod(new URL("key", directory), 0o644);
-  const version = "2026.10.21";
+  const version = "2026.10.26";
   const names = {
     "linux-x64": "yt-dlp_linux",
     "linux-arm64": "yt-dlp_linux_aarch64",

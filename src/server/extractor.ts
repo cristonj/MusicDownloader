@@ -1,3 +1,4 @@
+import { accountArgs, accountRevision } from "../../helper/accounts";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,12 @@ export interface Extracted {
   ext?: string;
   protocol?: string;
   acodec?: string;
+  abr?: number;
+  asr?: number;
+  audio_channels?: number;
+  bits_per_raw_sample?: number;
+  format_id?: string;
+  format_note?: string;
   is_live?: boolean;
   vcodec?: string;
   fragments?: { url?: string; path?: string; range?: string }[];
@@ -64,10 +71,7 @@ async function extractUncached(
     "--dump-single-json",
     "--skip-download",
   ];
-  args.push(
-    "-f",
-    "bestaudio[protocol=https]/bestaudio[protocol=http]/bestaudio/best",
-  );
+  args.push("-f", "bestaudio[format_id!*=preview]/best[format_id!*=preview]");
   if (flat)
     args.push(
       "--flat-playlist",
@@ -78,6 +82,7 @@ async function extractUncached(
   else args.push("--no-playlist");
   if (profile)
     args.push("--extractor-args", `youtube:player_client=${profile}`);
+  args.push(...accountArgs(url));
   args.push("--", url);
   return new Promise((resolve, reject) => {
     const process = spawn(binary, args, {
@@ -221,7 +226,8 @@ export async function extract(
   flat = false,
   signal?: AbortSignal,
 ): Promise<Extracted> {
-  const key = `${flat}:${url}`,
+  const revision = accountRevision();
+  const key = `${revision}:${flat}:${url}`,
     saved = cache.get(key);
   if (saved && saved.expires > Date.now()) return saved.value;
   if (pending.has(key)) return pending.get(key)!;
@@ -229,7 +235,10 @@ export async function extract(
     .then((value) => {
       cache.set(key, { value, expires: Date.now() + 180000 });
       if (flat && !value.entries && value.url)
-        cache.set(`false:${url}`, { value, expires: Date.now() + 180000 });
+        cache.set(`${revision}:false:${url}`, {
+          value,
+          expires: Date.now() + 180000,
+        });
       while (cache.size > 32) cache.delete(cache.keys().next().value!);
       return value;
     })
@@ -246,11 +255,19 @@ export function extractUsingClient(
   return extractUncached(url, false, signal, client);
 }
 export function invalidateExtraction(url: string) {
-  cache.delete(`true:${url}`);
-  cache.delete(`false:${url}`);
+  cache.delete(`${accountRevision()}:true:${url}`);
+  cache.delete(`${accountRevision()}:false:${url}`);
 }
 
 export function rememberExtraction(url: string, value: Extracted) {
-  cache.set(`false:${url}`, { value, expires: Date.now() + 180000 });
+  cache.set(`${accountRevision()}:false:${url}`, {
+    value,
+    expires: Date.now() + 180000,
+  });
   while (cache.size > 32) cache.delete(cache.keys().next().value!);
+}
+
+export function clearExtractions() {
+  cache.clear();
+  pending.clear();
 }

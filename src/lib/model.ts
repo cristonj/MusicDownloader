@@ -1,3 +1,4 @@
+import type { SourceQuality, AudioMeasurement } from "./quality";
 export type Provider =
   | "YouTube"
   | "SoundCloud"
@@ -9,9 +10,20 @@ export type Provider =
   | "Direct link"
   | "Local file";
 export type Format =
-  "original" | "mp3" | "m4a" | "flac" | "wav" | "ogg" | "opus" | "aiff";
+  | "original"
+  | "mp3"
+  | "m4a"
+  | "flac"
+  | "wav"
+  | "ogg"
+  | "opus"
+  | "aiff";
 export type TrackStatus =
-  "ready" | "fetching" | "converting" | "done" | "error";
+  | "ready"
+  | "fetching"
+  | "converting"
+  | "done"
+  | "error";
 export interface Track {
   id: string;
   title: string;
@@ -34,6 +46,10 @@ export interface Track {
   status: TrackStatus;
   progress: number;
   error?: string;
+  quality?: SourceQuality;
+  measurement?: AudioMeasurement;
+  qualityWarning?: string;
+  replacement?: boolean;
   output?: Blob;
   outputName?: string;
 }
@@ -46,6 +62,7 @@ export interface Preferences {
   bitrate: "128" | "192" | "256" | "320";
   sampleRate: "source" | "44100" | "48000" | "96000";
   bitDepth: "16" | "24";
+  preventClipping?: boolean;
 }
 export const defaults: Preferences = {
   format: "original",
@@ -53,7 +70,8 @@ export const defaults: Preferences = {
   feedHidden: [],
   bitrate: "320",
   sampleRate: "source",
-  bitDepth: "16",
+  bitDepth: "24",
+  preventClipping: false,
 };
 export const formats: { value: Format; label: string; note: string }[] = [
   { value: "original", label: "Original", note: "Fastest · no conversion" },
@@ -215,6 +233,8 @@ export function conversionArgs(prefs: Preferences): string[] {
       "libmp3lame",
       "-b:a",
       `${prefs.bitrate}k`,
+      "-compression_level",
+      "0",
       "-id3v2_version",
       "3",
     ],
@@ -232,17 +252,19 @@ export function conversionArgs(prefs: Preferences): string[] {
       "-sample_fmt",
       prefs.bitDepth === "24" ? "s32" : "s16",
       "-compression_level",
-      "5",
+      "8",
     ],
     wav: ["-c:a", prefs.bitDepth === "24" ? "pcm_s24le" : "pcm_s16le"],
-    ogg: ["-c:a", "libvorbis", "-b:a", `${prefs.bitrate}k`, "-ac", "2"],
-    // The pinned WASM core traps in libopus stereo encoding; the native
-    // FFmpeg Opus encoder supports these settings without that memory fault.
+    ogg: [
+      "-c:a",
+      "libvorbis",
+      "-q:a",
+      { "128": "4", "192": "6", "256": "8", "320": "10" }[prefs.bitrate],
+    ],
+    // Opus encoding is handled by the dedicated libopus worker.
     opus: [
       "-c:a",
-      "opus",
-      "-strict",
-      "-2",
+      "libopus",
       "-b:a",
       `${prefs.bitrate}k`,
       "-ac",
@@ -253,11 +275,16 @@ export function conversionArgs(prefs: Preferences): string[] {
     aiff: ["-c:a", prefs.bitDepth === "24" ? "pcm_s24be" : "pcm_s16be"],
   };
   if (prefs.format === "original") return [];
+  if (prefs.format === "mp3" && prefs.sampleRate === "96000")
+    throw new Error("MP3 supports up to 48 kHz. Choose Source or 48 kHz.");
   return [
     "-map",
     "0:a:0",
     "-vn",
     ...codecs[prefs.format],
+    ...(isLossless(prefs.format)
+      ? ["-af", "aresample=dither_method=triangular"]
+      : []),
     ...(prefs.sampleRate !== "source" && prefs.format !== "opus"
       ? ["-ar", prefs.sampleRate]
       : []),
@@ -289,6 +316,7 @@ export function readPreferences(value: string | null): Preferences {
       sampleRate: ["source", "44100", "48000", "96000"].includes(p.sampleRate)
         ? p.sampleRate
         : defaults.sampleRate,
+      preventClipping: p.preventClipping === true,
       bitDepth: ["16", "24"].includes(p.bitDepth)
         ? p.bitDepth
         : defaults.bitDepth,
