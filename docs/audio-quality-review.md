@@ -36,6 +36,7 @@ These are controlled regression fixtures, not measurements of arbitrary commerci
 | Stereo Opus timing | Exact decoded sample count preserved | Encoder delay and terminal padding are handled correctly |
 | Original HLS export | Canonically remuxed AAC packets match byte for byte | Audio survives the assembly/remux path without another lossy encode |
 | Same-format MP3 | A 128 kbps input exports at the selected 320 kbps and 192 kbps rates | The output settings are honored; this does not recover lost source detail |
+| Quiet float-to-24-bit conversion | Dither verified at the actual 24-bit quantization depth | Avoids collapsing a sub-LSB signal through undithered quantization |
 | ZIP export | Original entry bytes preserved | Archiving does not alter audio |
 
 Peak protection measures the input, applies only necessary negative gain, then checks the encoded output. It can correct the gain and encode again from the original input, with a maximum of three attempts. It rejects an unverifiable or out-of-target result. It does not repeatedly transcode an already encoded output, boost quiet music, normalize playlist loudness, or repair clipping already present in a master. Original remains untouched.
@@ -65,4 +66,4 @@ Google/YouTube Music and SoundCloud subscriptions can expose better entitled str
 
 The application and desktop helper must be updated together for account access and the new extraction rules. The web app detects older helper protocol versions and prompts for an update. The desktop release workflow builds Windows (installer and portable), Mac and Linux packages and checks their bundled runtimes without an installed Node/Python toolchain. Account functionality still requires the listener's own supported browser and login.
 
-Local validation passed TypeScript checking, 72 unit/regression checks, 18 real browser tests, native FFmpeg comparisons, and the packaged Linux helper runtime check with an empty PATH. See the commit's checks for the final release status. No claim of perfection or guaranteed premium access is made: the release provides stronger defaults, observable measurements and concrete regression checks.
+Local validation passed TypeScript checking, 72 unit/regression checks, 19 real browser tests, native FFmpeg comparisons, and the packaged Linux helper runtime check with an empty PATH. See the commit's checks for the final release status. No claim of perfection or guaranteed premium access is made: the release provides stronger defaults, observable measurements and concrete regression checks.

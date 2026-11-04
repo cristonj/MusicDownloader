@@ -942,3 +942,53 @@ test("same-format MP3 exports honor bitrate changes instead of silently copying"
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("24-bit conversion dithers float quantization at the actual output bit depth", async ({
+  page,
+}) => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "music-dither-"));
+  try {
+    const input = join(directory, "Quiet.wav");
+    execFileSync("ffmpeg", [
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "aevalsrc=0.00000001*sin(2*PI*440*t):s=44100:d=1",
+      "-c:a",
+      "pcm_f32le",
+      input,
+    ]);
+    await page.goto("/");
+    await page.locator("input[type=file]").setInputFiles(input);
+    await page.getByLabel("Output format").selectOption("wav");
+    const waiting = page.waitForEvent("download");
+    await page
+      .getByRole("button", { name: "Download track", exact: true })
+      .click();
+    const download = await waiting;
+    const bytes = execFileSync("ffmpeg", [
+      "-v",
+      "error",
+      "-i",
+      (await download.path())!,
+      "-c:a",
+      "pcm_f32le",
+      "-f",
+      "f32le",
+      "-",
+    ]);
+    const values = new Float32Array(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    );
+    const nonzero = values.filter((v) => v !== 0).length;
+    expect(nonzero).toBeGreaterThan(values.length * 0.05);
+    expect(Math.max(...values.map(Math.abs))).toBeLessThan(0.0000005);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

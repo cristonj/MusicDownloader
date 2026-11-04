@@ -196,7 +196,9 @@ export async function convertAudio(
       const filters = [
         ...(gain < 0 ? [`volume=${gain.toFixed(6)}dB:precision=double`] : []),
         ...(["flac", "wav", "aiff"].includes(outputFormat)
-          ? ["aresample=dither_method=triangular"]
+          ? [
+              `aresample=dither_method=triangular:output_sample_bits=${prefs.bitDepth}`,
+            ]
           : []),
       ];
       let args = original
