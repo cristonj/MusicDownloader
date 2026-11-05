@@ -123,15 +123,19 @@ export async function prepareExtension(source: string, home: string) {
   return directory;
 }
 
-export function openExtensionSetup(browser: "chrome" | "edge", directory: string) {
+export async function openExtensionSetup(browser: "chrome" | "edge", directory: string) {
   if (process.platform !== "win32") return false;
   const roots = [process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env.LOCALAPPDATA].filter(Boolean) as string[];
   const binary = roots.map((root) => join(root, ...(browser === "edge"
     ? ["Microsoft", "Edge", "Application", "msedge.exe"]
     : ["Google", "Chrome", "Application", "chrome.exe"]))).find(existsSync);
   if (!binary) throw new Error(`Install ${browser === "edge" ? "Edge" : "Chrome"} first, or choose the other browser.`);
-  spawn(binary, [browser === "edge" ? "edge://extensions/" : "chrome://extensions/"],
-    { stdio: "ignore", windowsHide: true }).on("error", () => {}).unref();
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(binary, ["--new-window", browser === "edge" ? "edge://extensions/" : "chrome://extensions/"],
+      { stdio: "ignore", windowsHide: true });
+    child.once("error", () => reject(new Error("The browser could not open. Paste the extension page address into its address bar.")));
+    child.once("spawn", () => { child.unref(); resolve(); });
+  });
   spawn("explorer.exe", [directory], { stdio: "ignore", windowsHide: true }).on("error", () => {}).unref();
   return true;
 }

@@ -17,6 +17,13 @@ export function extractionFailure(
   stderr: string,
   youtube: boolean,
 ): ExtractionError {
+  if (/ERR_ACCESS_DENIED|node:internal\/bootstrap\/pkg/.test(stderr))
+    return new ExtractionError(
+      "JS_RUNTIME_SANDBOX",
+      "The helper's JavaScript runtime could not start its playback challenge sandbox. Download and reopen the updated helper.",
+      false,
+      503,
+    );
   if (
     /could not (?:copy|find|decrypt).*cookie|failed to decrypt|cookie database|keyring|keychain|DPAPI|cookies? (?:database|file)|browser.*not found/i.test(
       stderr,

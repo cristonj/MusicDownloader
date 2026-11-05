@@ -55,7 +55,7 @@ test("extension setup explains installation, copies pairing details, and shows s
     if (request.method() === "OPTIONS") { await route.fulfill({ status: 204, headers }); return; }
     expect(request.headers().authorization).toBe(`Bearer ${token}`);
     let value: unknown = {};
-    if (path === "/health") value = { app: "MusicDownloader", version: 10, ready: true };
+    if (path === "/health") value = { app: "MusicDownloader", version: 11, ready: true };
     if (path === "/accounts") value = { accounts: paired ? { youtube: "extension" } : {} };
     if (path === "/extension/status") value = { paired, services: paired ? { youtube: { updated: Date.now(), expires: Date.now() + 900000 } } : {} };
     if (path === "/extension/setup") {
@@ -70,6 +70,9 @@ test("extension setup explains installation, copies pairing details, and shows s
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await page.getByRole("button", { name: "Sign in for better audio", exact: true }).click();
   await page.getByLabel("Extension browser").selectOption("edge");
+  await expect(page.locator(".extension-setup")).toContainText("edge://extensions/");
+  await page.getByRole("button", { name: "Copy extension page address", exact: true }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("edge://extensions/");
   await page.getByRole("button", { name: "Set up browser extension", exact: true }).click();
   await expect(page.locator(".extension-setup")).toContainText("Load unpacked");
   await expect(page.locator(".extension-setup")).toContainText(directory);

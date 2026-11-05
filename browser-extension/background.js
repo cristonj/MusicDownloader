@@ -87,6 +87,10 @@ chrome.runtime.onStartup.addListener(() => {
   void chrome.alarms.create("refresh", { periodInMinutes: 2 });
   void refresh();
 });
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install")
+    void chrome.tabs.create({ url: chrome.runtime.getURL("popup.html") });
+});
 chrome.permissions.onRemoved.addListener(() => { void refresh(); });
 // Chrome can suspend a worker between alarms. Recreate its refresh schedule
 // when loaded after an extension update as well as a normal browser restart.

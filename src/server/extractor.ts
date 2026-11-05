@@ -1,4 +1,5 @@
 import { accountArgs, accountRevision } from "../../helper/accounts";
+import { javascriptRuntime } from "../../helper/js-runtime";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,7 +57,6 @@ async function extractUncached(
     // Reuse SoundCloud client IDs and YouTube player data across runs.
     "--cache-dir",
     join(tmpdir(), "musicdownloader-yt-dlp"),
-    "--no-warnings",
     "--no-progress",
     "--socket-timeout",
     "10",
@@ -68,7 +68,7 @@ async function extractUncached(
     "youtube.*,soundcloud.*,bandcamp.*",
     "--no-js-runtimes",
     "--js-runtimes",
-    `node:${process.execPath}`,
+    `node:${javascriptRuntime()}`,
     "--dump-single-json",
     "--skip-download",
   ];

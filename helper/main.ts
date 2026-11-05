@@ -6,6 +6,7 @@ import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, execFileSync } from "node:child_process";
 import { prepareMediaTools } from "../scripts/media-tools.mjs";
+import { prepareJavaScriptRuntime } from "../scripts/js-runtime.mjs";
 import { startHelper, HELPER_PORT } from "./server";
 import { enableLocalAccounts } from "./accounts";
 import { ExtensionBridge, prepareExtension, openExtensionSetup } from "./extension";
@@ -39,6 +40,9 @@ async function main() {
       await prepareMediaTools(pathToFileURL(join(temporary, ".server") + sep), {
         bundledDir: pathToFileURL(join(__dirname, "assets") + sep),
       });
+      const runtime = await prepareJavaScriptRuntime(pathToFileURL(join(temporary, ".server") + sep), {
+        bundledDir: pathToFileURL(join(__dirname, "assets") + sep),
+      });
       const version = execFileSync(
         join(
           temporary,
@@ -49,18 +53,23 @@ async function main() {
         { encoding: "utf8", env: { ...process.env, PATH: "" } },
       ).trim();
       const nodeVersion = execFileSync(
-        process.execPath,
+        runtime,
         ["-e", "process.stdout.write(process.versions.node)"],
         { encoding: "utf8", env: { ...process.env, PATH: "" } },
       ).trim();
       if (!/^22\./.test(nodeVersion) || !/^2026\./.test(version))
         throw new Error("Bundled runtime check failed.");
+      const sandbox = execFileSync(runtime, ["--permission", "--input-type=module", "-"], {
+        encoding: "utf8", env: { ...process.env, PATH: "" },
+        input: 'import fs from "node:fs"; try { fs.readFileSync(process.execPath); process.exit(1); } catch (e) { if (e.code !== "ERR_ACCESS_DENIED") throw e; } process.stdout.write("sandbox-ok");',
+      });
+      if (sandbox !== "sandbox-ok") throw new Error("The JavaScript challenge sandbox failed.");
       if (!existsSync(join(__dirname, "assets", "app", "index.html")))
         throw new Error("The bundled app is missing.");
       const extension = await prepareExtension(join(__dirname, "assets", "extension"), temporary);
       if (!existsSync(join(extension, "manifest.json"))) throw new Error("The bundled extension is missing.");
       console.log(
-        "Bundled Node, app, and download tool work with an empty PATH.",
+        "Bundled Node challenge sandbox, app, extension, and download tool work with an empty PATH.",
       );
     } finally {
       process.chdir(previous);
@@ -145,6 +154,9 @@ async function main() {
     console.log(`Open this address in your browser to connect:\n${paired}`);
   }
   try {
+    await prepareJavaScriptRuntime(pathToFileURL(join(home, ".server") + sep), {
+      bundledDir: pathToFileURL(join(__dirname, "assets") + sep),
+    });
     await prepareMediaTools(pathToFileURL(join(home, ".server") + sep), {
       bundledDir: pathToFileURL(join(__dirname, "assets") + sep),
     });

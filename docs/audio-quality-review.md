@@ -85,3 +85,7 @@ Five tracks from YouTube and SoundCloud, exported through the shipped WASM engin
 | AAC encoder flags (`aac_pns`, `aac_is`, `aac_tns`, `aac_ms`) | Null-test SNR 23.0–29.7 dB | Not adopted | At most 0.4 dB better, and disabling mid/side was worse |
 
 Open items: FFmpeg's native AAC scored lowest in null tests (23–42 dB, against 30–47 dB for MP3 at the same target). Null tests measure waveform difference, not audibility. AAC output from WebM input also sits 336 samples (7 ms) late; the cause is not established. Opus has no content above 20 kHz by design. None of this exceeds the source: a source lowpassed at 16 kHz stays lowpassed at 16 kHz.
+
+## Download integrity, 5 November 2026
+
+Original downloads through the real app were compared with direct `yt-dlp` downloads of one YouTube and one SoundCloud track. Audio packets were identical, and a jump-based detector found no clicks in either copy. The YouTube stream's single Opus packet warning also appears in the direct download, so it comes from the source. Both tracks decode above full scale (+3.16 dB and +1.00 dB), so Original can clip on playback; the protected FLAC default avoids that. The detector does not prove a recording is free of audible distortion.

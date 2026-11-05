@@ -71,19 +71,24 @@ export default function ExtensionSetup({ onAccountsChanged }: { onAccountsChange
       <button className="primary-button" disabled={!connected || busy} onClick={() => void begin()}>
         {busy ? "Preparing…" : setup ? "Generate new pairing code" : "Set up browser extension"}
       </button>
+      <p className="settings-note">
+        If the browser doesn&apos;t open its extensions page, paste this address
+        into the address bar of {browser === "edge" ? "Edge" : "Chrome"} and press Enter:
+      </p>
+      <code className="extension-value">{browser}://extensions/</code>
+      <button className="text-button" onClick={() => void copy(`${browser}://extensions/`)}>Copy extension page address</button>
       {setup && (
         <ol className="better-steps">
           <li>
             <strong>Load the prepared extension once</strong>
-            <p>{setup.opened ? "The helper opened the extension folder and browser setup." : "Open the extension page in your chosen browser."}
+            <p>{setup.opened ? "The helper requested a new browser setup window and opened the extension folder. If the window did not appear, use the address above." : "Open the extension page using the address above."}
               {" "}Turn on Developer mode, choose <b>Load unpacked</b>, and select this folder:</p>
             <code className="extension-value">{setup.directory}</code>
-            <button className="text-button" onClick={() => void copy(setup.directory)}>Copy folder path</button>{" "}
-            <button className="text-button" onClick={() => void copy(`${browser}://extensions/`)}>Copy extension page address</button>
+            <button className="text-button" onClick={() => void copy(setup.directory)}>Copy folder path</button>
           </li>
           <li>
-            <strong>Pair with this helper</strong>
-            <p>Open MusicDownloader Browser Connection from the browser&apos;s Extensions menu. Paste this code and click Pair with helper. The code works once and expires in five minutes.</p>
+            <strong>Open the installed extension and pair</strong>
+            <p>A connection tab opens automatically after installation. If it didn&apos;t, click the puzzle-piece Extensions button beside the browser address bar, then MusicDownloader Browser Connection. Paste this code into its Pairing code field and click Pair with helper. The code works once and expires in five minutes.</p>
             <code className="extension-value">{setup.code}</code>
             <button className="text-button" onClick={() => void copy(setup.code)}>Copy pairing code</button>
           </li>

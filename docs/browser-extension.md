@@ -10,11 +10,15 @@ Chrome/Edge's **Load unpacked** flow; it is not published to an extension store.
 1. Run the new helper EXE. In the app, choose **Sign in for better audio**.
 2. Choose Chrome or Edge under **Use this browser's signed-in session**, then
    **Set up browser extension**. On Windows the helper opens the extension
-   directory and the selected browser's extension page.
+   directory and requests a new browser window at its extension page. If Edge
+   does not navigate there, copy the visible `edge://extensions/` address from
+   the app, paste it in Edge's address bar and press Enter. Chrome uses
+   `chrome://extensions/`.
 3. Turn on **Developer mode**. Choose **Load unpacked**, paste the folder path
    shown by the app, and select that folder. Keep that folder in place.
-4. Open **MusicDownloader Browser Connection** in the browser's Extensions menu
-   (the puzzle piece). Paste the app's pairing code and choose **Pair with helper**.
+4. The extension opens its connection tab automatically after installation.
+   If needed, open **MusicDownloader Browser Connection** in the browser's
+   Extensions menu (the puzzle piece). Paste the app's pairing code and choose **Pair with helper**.
    Codes work once and expire after five minutes. Use **Generate new pairing
    code** if necessary.
 5. In the extension, open YouTube Music or SoundCloud. Sign in normally using

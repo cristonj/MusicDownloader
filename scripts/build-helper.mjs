@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 import { writeIcon } from "./make-icon.mjs";
 import { need } from "@yao-pkg/pkg-fetch";
 import { resolve } from "node:path";
+import { prepareJavaScriptRuntime } from "./js-runtime.mjs";
+import { pathToFileURL } from "node:url";
 const platform = process.argv[2] || process.platform,
   arch = process.argv[3] || process.arch;
 await import("./prepare-server.mjs");
@@ -11,6 +13,7 @@ const target = `node22-${platform === "win32" ? "win" : platform === "darwin" ? 
 await mkdir(".helper-build", { recursive: true });
 await mkdir("helper-dist", { recursive: true });
 await mkdir(".helper-build/assets", { recursive: true });
+await prepareJavaScriptRuntime(pathToFileURL(resolve(".helper-build/assets") + "/"), { platform, arch });
 await cp(
   `.server/${process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"}`,
   `.helper-build/assets/${process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"}`,

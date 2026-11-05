@@ -26,7 +26,7 @@ export function startHelper(options: {
   // The built app, served from this computer in place of the hosted page.
   appDir?: string;
   install?: { state: () => unknown; run: () => Promise<unknown> };
-  extension?: { bridge: ExtensionBridge; directory: string; open: (browser: "chrome" | "edge") => boolean };
+  extension?: { bridge: ExtensionBridge; directory: string; open: (browser: "chrome" | "edge") => boolean | Promise<boolean> };
 }) {
   const port = options.port ?? HELPER_PORT;
   const routes: Record<string, (request: Request) => Promise<Response>> = {
@@ -150,7 +150,7 @@ export function startHelper(options: {
       if (url.pathname === "/health") {
         respond(200, {
           app: "MusicDownloader",
-          version: 10,
+          version: 11,
           ...options.state(),
         });
         return;
@@ -169,7 +169,7 @@ export function startHelper(options: {
           }
           const { browser } = JSON.parse(body);
           if (browser !== "chrome" && browser !== "edge") throw new Error("Choose Chrome or Edge.");
-          const opened = options.extension.open(browser);
+          const opened = await options.extension.open(browser);
           respond(200, { ...options.extension.bridge.pairing(actualPort), directory: options.extension.directory, opened });
         } catch (error) {
           respond(400, { detail: error instanceof Error ? error.message : "Could not open extension setup." });
