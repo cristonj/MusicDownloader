@@ -64,6 +64,6 @@ Opted-in Google lookups include the YouTube Music client alongside the extractor
 
 ## Release and assurance
 
-The application and desktop helper must be updated together for account access and the new extraction rules. The web app detects older helper protocol versions and prompts for an update. The desktop release workflow builds Windows (installer and portable), Mac and Linux packages and checks their bundled runtimes without an installed Node/Python toolchain. Account functionality still requires the listener's own supported browser and login.
+The application and desktop helper must be updated together for account access and the new extraction rules. The web app detects older helper protocol versions and prompts for an update. The desktop release workflow builds Windows, Mac and Linux packages and checks their bundled runtimes without an installed Node/Python toolchain. Account functionality still requires the listener's own supported browser and login.
 
 Local validation passed TypeScript checking, 73 unit/regression checks, 19 real browser tests, native FFmpeg comparisons, and the packaged Linux helper runtime check with an empty PATH. See the commit's checks for the final release status. No claim of perfection or guaranteed premium access is made: the release provides stronger defaults, observable measurements and concrete regression checks.

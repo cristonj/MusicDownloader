@@ -12,6 +12,7 @@ import { providerFor } from "../src/lib/model";
 import { CHUNK_BYTES, hlsManifest, mediaChunk } from "../src/server/media";
 import { mediaFetch, publicFetch } from "../src/server/upstream";
 import { extract } from "../src/server/extractor";
+import { searchTracks } from "../src/server/spotify-search";
 import { POST as resolve } from "../src/app/api/resolve/route";
 import { POST as lookup } from "../src/app/api/lookup/route";
 import { POST as feed } from "../src/app/api/feed/route";
@@ -354,6 +355,111 @@ describe("private server endpoints", () => {
       "https://www.youtube.com/watch?v=fanupload00",
     );
   });
+  it("prefers the released song on YouTube Music over the video or a cover", async () => {
+    const songs: Record<string, object> = {
+      coverinsong: {
+        id: "coverinsong",
+        title: "The Emptiness Machine",
+        channel: "Good Girls Inc. - Topic",
+        duration: 188,
+        abr: 119,
+        formats: [{}],
+      },
+      releasesong: {
+        id: "releasesong",
+        title: "The Emptiness Machine",
+        channel: "Linkin Park",
+        duration: 190,
+        abr: 128,
+        formats: [{}],
+      },
+    };
+    vi.mocked(extract).mockImplementation(async (url) => {
+      if (url.startsWith("https://music.youtube.com/search"))
+        return {
+          entries: [
+            { id: "coverinsong", title: "The Emptiness Machine" },
+            { id: "unrelatedso", title: "One More Light" },
+            { id: "releasesong", title: "The Emptiness Machine" },
+          ],
+        };
+      const id = new URL(url).searchParams.get("v");
+      if (id && songs[id]) return songs[id];
+      throw new Error(`Should not have read ${url}`);
+    });
+    const match = await matchTrack({
+      title: "The Emptiness Machine",
+      artist: "Linkin Park",
+      duration: 190.2,
+    });
+    expect(match.sourceUrl).toBe("https://www.youtube.com/watch?v=releasesong");
+    expect(match.matchConfident).toBe(true);
+  });
+  it("looks past Spotify's remaster note but keeps it on the track", async () => {
+    vi.mocked(extract).mockImplementation(async (url) =>
+      url === "ytsearch10:Queen Under Pressure official audio"
+        ? {
+            entries: [
+              {
+                id: "officialaud",
+                title: "Under Pressure",
+                channel: "Queen - Topic",
+                duration: 248,
+              },
+            ],
+          }
+        : { entries: [] },
+    );
+    const match = await matchTrack({
+      title: "Under Pressure - Remastered 2011",
+      artist: "Queen",
+      duration: 248,
+    });
+    expect(match.sourceUrl).toBe("https://www.youtube.com/watch?v=officialaud");
+    expect(match.title).toBe("Under Pressure - Remastered 2011");
+  });
+  it("keeps looking past a fan upload and does not trust another artist's Topic channel", async () => {
+    const read: string[] = [];
+    vi.mocked(extract).mockImplementation(async (url) => {
+      read.push(url);
+      if (url.includes("official audio"))
+        return {
+          entries: [
+            {
+              id: "fanupload00",
+              title: "Some Artist - A Song (Audio)",
+              channel: "Minimal Sounds",
+              duration: 200,
+            },
+            {
+              id: "othertopic0",
+              title: "A Song",
+              channel: "Tribute Band - Topic",
+              duration: 200,
+            },
+          ],
+        };
+      if (url.startsWith("ytsearch10:Some Artist A Song"))
+        return {
+          entries: [
+            {
+              id: "officialaud",
+              title: "A Song",
+              channel: "Some Artist - Topic",
+              duration: 200,
+            },
+          ],
+        };
+      return { entries: [] };
+    });
+    const match = await matchTrack({
+      title: "A Song",
+      artist: "Some Artist",
+      duration: 200,
+    });
+    expect(match.sourceUrl).toBe("https://www.youtube.com/watch?v=officialaud");
+    expect(read.some((url) => url.startsWith("scsearch"))).toBe(false);
+  });
   it("finds a YouTube upload when SoundCloud refuses a track for DRM", async () => {
     vi.mocked(extract).mockImplementation(async (url) =>
       url.startsWith("ytsearch10:")
@@ -441,6 +547,9 @@ describe("private server endpoints", () => {
     );
     expect(found.matchReason).toMatch(/^On SoundCloud/);
     expect(vi.mocked(extract).mock.calls[1][0]).toBe(
+      "https://music.youtube.com/search?q=Some%20Artist%20Locked%20Song#songs",
+    );
+    expect(vi.mocked(extract).mock.calls[2][0]).toBe(
       "ytsearch10:Some Artist Locked Song official audio",
     );
   });
@@ -807,6 +916,13 @@ describe("upload titles read as song names", () => {
         "expectations (feat. Chappell Roan)",
         "Olivia Rodrigo",
       ],
+      // The uploader's own name after the dash is the artist, not the song.
+      [
+        "The Emptiness Machine (Official Music Video) - Linkin Park",
+        "Linkin Park",
+        "The Emptiness Machine",
+        "Linkin Park",
+      ],
       // Names that are already names are left alone.
       ["lofi hip hop radio", "ChilledCow", "lofi hip hop radio", "ChilledCow"],
       // Short first segments are names, not credits.
@@ -877,9 +993,47 @@ describe("service feeds", () => {
     expect(readTicket(apple.tracks[0].matchTicket, "match").origin).toBe(
       "Apple Music",
     );
-    const spotify = await ask("Spotify", "billie eilish");
-    expect(spotify.status).toBe(422);
-    expect((await spotify.json()).detail).toMatch(/needs an account/);
+  });
+  it("reads Spotify's search rows into importable names", () => {
+    const tracks = searchTracks(
+      [
+        {
+          title: " The Emptiness Machine ",
+          artists: "Linkin Park",
+          time: "3:10",
+          art: "https://i.scdn.co/image/ab67616d00004851abc",
+        },
+        // The same recording on another release.
+        {
+          title: "The Emptiness Machine",
+          artists: "Linkin Park",
+          time: "3:10",
+        },
+        {
+          title: "The Emptiness Machine - Live",
+          artists: "Linkin Park, Guest",
+          time: "1:03:15",
+          art: "https://attacker.test/image.jpg",
+        },
+        { title: "", artists: "Nobody" },
+      ],
+      10,
+    );
+    expect(tracks).toEqual([
+      {
+        title: "The Emptiness Machine",
+        artist: "Linkin Park",
+        duration: 190,
+        artwork: "https://i.scdn.co/image/ab67616d00001e02abc",
+      },
+      {
+        title: "The Emptiness Machine - Live",
+        artist: "Linkin Park, Guest",
+        duration: 3795,
+        artwork: undefined,
+      },
+    ]);
+    expect(searchTracks([{ title: "A" }, { title: "B" }], 1)).toHaveLength(1);
   });
   it("skips search results that are live or have no usable link", async () => {
     vi.mocked(extract).mockResolvedValue({

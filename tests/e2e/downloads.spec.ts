@@ -241,6 +241,12 @@ test("the service feed browses charts and adds a row to the collection", async (
   // Every service gets its own column, including one that has no chart.
   await expect(page.locator(".feed-card")).toHaveCount(4);
   await expect(page.getByText("A charting song")).toBeVisible();
+  // All four sit side by side on an ordinary laptop width.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const tops = await page
+    .locator(".feed-card")
+    .evaluateAll((cards) => cards.map((c) => c.getBoundingClientRect().top));
+  expect(new Set(tops).size).toBe(1);
   await expect(
     page.getByText("SoundCloud publishes no public chart.", { exact: false }),
   ).toBeVisible();
@@ -668,8 +674,8 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
   await expect(page).not.toHaveURL(/helper_token/);
   await page.getByLabel("Helper operating system").selectOption("windows");
   await expect(
-    page.getByRole("link", { name: "Download installer" }),
-  ).toHaveAttribute("href", /MusicDownloader-Helper-Windows-Setup.exe$/);
+    page.getByRole("link", { name: "Download helper" }),
+  ).toHaveAttribute("href", /MusicDownloader-Helper-Windows\.exe$/);
   await page
     .getByText("Connect accounts for better sources", { exact: true })
     .click();

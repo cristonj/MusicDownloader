@@ -17,6 +17,7 @@ import { fetchAudio, localTrack, resolveLink } from "@/lib/sources";
 import { importRow, type FeedRow } from "@/lib/feed";
 import {
   consumeHelperPair,
+  isLocalApp,
   helperConnection,
   helperFetch,
   helperOutdated,
@@ -61,7 +62,8 @@ export function useLibrary() {
 
   useEffect(() => {
     try {
-      if (consumeHelperPair()) setHelperOpen(true);
+      // The helper's own copy of the app has nothing left to set up.
+      if (consumeHelperPair()) setHelperOpen(!isLocalApp());
       else if (helperConnection())
         helperFetch("/health", { signal: AbortSignal.timeout(5000) })
           .then((response) => response.json())

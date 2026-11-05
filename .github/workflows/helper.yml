@@ -5,9 +5,9 @@ on:
     branches: [main]
     paths:
       - "helper/**"
-      - "src/server/**"
-      - "src/app/api/**"
-      - "src/lib/model.ts"
+      - "src/**"
+      - "public/**"
+      - "next.config.ts"
       - "scripts/media-tools.mjs"
       - "scripts/build-helper.mjs"
       - "scripts/package-mac-helper.mjs"
@@ -26,7 +26,10 @@ jobs:
       - name: Prepare helper release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view helper-v1 || gh release create helper-v1 --title "MusicDownloader desktop helper" --notes "Self-contained desktop helper. Download the file for your computer and open it."
+        run: |
+          gh release view helper-v1 || gh release create helper-v1 --title "MusicDownloader desktop helper" --notes "Self-contained desktop helper. Download the file for your computer and open it."
+          # The helper installs itself now; Defender flagged the old Setup file.
+          gh release delete-asset helper-v1 MusicDownloader-Helper-Windows-Setup.exe --yes || true
   build:
     needs: prepare
     strategy:
@@ -57,12 +60,6 @@ jobs:
         run: |
           & ./helper-dist/MusicDownloader-Helper-win32-x64.exe --self-test
           Copy-Item helper-dist/MusicDownloader-Helper-win32-x64.exe helper-dist/MusicDownloader-Helper-Windows.exe
-          # An installer gives the helper a Start menu entry, an uninstall
-          # entry, and an update that replaces the installed copy in place.
-          choco install innosetup --no-progress -y
-          $version = "1.0.$env:GITHUB_RUN_NUMBER"
-          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
-          & $iscc /DAppVersion=$version /O"helper-dist" scripts/windows-installer.iss
           Get-ChildItem helper-dist/*.exe | ForEach-Object {
             "{0}: {1:N1} MB" -f $_.Name, ($_.Length / 1MB)
           }
@@ -86,14 +83,14 @@ jobs:
           fail_on_unmatched_files: false
           body: |
             Download the helper for your computer, open it, and approve the browser connection.
-            Windows: the Setup download installs the helper as an application and replaces an older installed copy. The plain .exe is the same helper without an installer.
+            Windows: open the .exe. It runs right away, and its setup page can add it to your Start menu and replace an older installed copy.
+            The app runs on your computer at 127.0.0.1. Spotify search uses your installed Edge or Chrome.
             Python and Node are included; neither needs to be installed.
             Keep the helper running while using MusicDownloader. Quit it from the app's helper setup.
             These builds are unsigned and your operating system may ask you to allow them.
             Mac: unzip, then open MusicDownloader Helper.app. Supports Apple Silicon and Intel.
             Source and third-party notices: https://github.com/cristonj/MusicDownloader
           files: |
-            helper-dist/MusicDownloader-Helper-Windows-Setup.exe
             helper-dist/MusicDownloader-Helper-Windows.exe
             helper-dist/MusicDownloader-Helper-Linux.tar.gz
             helper-dist/MusicDownloader-Helper-Mac.zip

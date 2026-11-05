@@ -12,6 +12,7 @@ import { GET as audio } from "../src/app/api/audio/route";
 import { GET as media } from "../src/app/api/media/route";
 
 import { localAccounts, saveLocalAccounts } from "./accounts";
+import { appFile } from "./app-files";
 import { clearExtractions } from "../src/server/extractor";
 export const HELPER_PORT = 45821;
 export function startHelper(options: {
@@ -20,6 +21,9 @@ export function startHelper(options: {
   port?: number;
   state: () => { ready: boolean; error?: string };
   onQuit?: () => void;
+  // The built app, served from this computer in place of the hosted page.
+  appDir?: string;
+  install?: { state: () => unknown; run: () => Promise<unknown> };
 }) {
   const port = options.port ?? HELPER_PORT;
   const routes: Record<string, (request: Request) => Promise<Response>> = {
@@ -32,8 +36,13 @@ export function startHelper(options: {
   };
   const server = createServer(
     async (req: IncomingMessage, res: ServerResponse) => {
+      const address = server.address();
+      const actualPort =
+        typeof address === "object" && address ? address.port : port;
+      const local = `http://127.0.0.1:${actualPort}`;
       const cors = {
-        "Access-Control-Allow-Origin": options.origin,
+        "Access-Control-Allow-Origin":
+          req.headers.origin === local ? local : options.origin,
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Authorization, Content-Type, Range",
         "Access-Control-Expose-Headers":
@@ -47,13 +56,33 @@ export function startHelper(options: {
         res.writeHead(status, { ...cors, "Content-Type": "application/json" });
         res.end(JSON.stringify(body));
       };
-      const address = server.address();
-      const actualPort =
-        typeof address === "object" && address ? address.port : port;
+      const path = new URL(req.url || "/", local).pathname;
       if (
-        req.headers.host !== `127.0.0.1:${actualPort}` ||
-        req.headers.origin !== options.origin
+        options.appDir &&
+        req.headers.host === `127.0.0.1:${actualPort}` &&
+        (req.method === "GET" || req.method === "HEAD") &&
+        !/^\/(?:api\/|health$|accounts$|install$|quit$)/.test(path)
       ) {
+        const file = await appFile(options.appDir, path);
+        res.writeHead(file ? 200 : 404, {
+          "Content-Type": file?.type || "text/plain",
+          "Cache-Control": file?.immutable
+            ? "public, max-age=31536000, immutable"
+            : "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
+          "Cross-Origin-Resource-Policy": "same-origin",
+        });
+        res.end(req.method === "HEAD" ? undefined : file?.body);
+        return;
+      }
+      // Browsers send no Origin on a same-origin GET from the local app.
+      const trusted =
+        req.headers.origin === options.origin ||
+        req.headers.origin === local ||
+        (!req.headers.origin &&
+          req.headers["sec-fetch-site"] === "same-origin");
+      if (req.headers.host !== `127.0.0.1:${actualPort}` || !trusted) {
         respond(403, {
           detail:
             "This helper only accepts connections from your MusicDownloader app.",
@@ -80,7 +109,7 @@ export function startHelper(options: {
       if (url.pathname === "/health") {
         respond(200, {
           app: "MusicDownloader",
-          version: 6,
+          version: 7,
           ...options.state(),
         });
         return;
@@ -103,6 +132,21 @@ export function startHelper(options: {
           respond(400, {
             detail:
               "Could not save account settings. Choose a supported browser.",
+          });
+        }
+        return;
+      }
+      if (url.pathname === "/install" && req.method === "GET") {
+        respond(200, options.install?.state() ?? { available: false });
+        return;
+      }
+      if (url.pathname === "/install" && req.method === "POST") {
+        try {
+          if (!options.install) throw new Error("Unavailable.");
+          respond(200, await options.install.run());
+        } catch {
+          respond(500, {
+            detail: "Could not install the helper on this computer.",
           });
         }
         return;

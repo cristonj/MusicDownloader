@@ -10,6 +10,7 @@ import {
   helperFetch,
   disconnectHelper,
   helperOutdated,
+  isLocalApp,
 } from "@/lib/helper";
 
 export default function HelperSetup({ onClose }: { onClose: () => void }) {
@@ -20,6 +21,21 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState("");
   const [checking, setChecking] = useState(false);
   const [ready, setReady] = useState(false);
+  const [local, setLocal] = useState(false);
+  const [install, setInstall] = useState<{
+    available?: boolean;
+    installed?: boolean;
+    current?: boolean;
+  }>({});
+  const [installing, setInstalling] = useState(false);
+  useEffect(() => setLocal(isLocalApp()), []);
+  useEffect(() => {
+    if (!ready) return;
+    helperFetch("/install")
+      .then((response) => response.json())
+      .then(setInstall)
+      .catch(() => setInstall({}));
+  }, [ready]);
   useEffect(() => {
     const name = navigator.userAgent.toLowerCase();
     setPlatform(
@@ -27,6 +43,7 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
     );
   }, []);
   useEffect(() => {
+    if (isLocalApp()) return;
     let active = true;
     const update = async () => {
       try {
@@ -119,80 +136,75 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
         <p className="modal-description">
           One small helper. No Python. No commands.
         </p>
-        <ol className="helper-steps">
-          <li>
-            <strong>Download</strong>
-            <select
-              aria-label="Helper operating system"
-              value={platform}
-              onChange={(event) =>
-                setPlatform(event.target.value as typeof platform)
-              }
-            >
-              <option value="windows">Windows</option>
-              <option value="mac">Mac</option>
-              <option value="linux">Linux</option>
-            </select>
-            <a
-              className="primary-button"
-              aria-disabled={!downloads[platform]}
-              onClick={(event) => {
-                if (!downloads[platform]) event.preventDefault();
-              }}
-              href={downloads[platform] ? helperDownloads[platform] : undefined}
-            >
-              <Download size={16} />
-              {downloads[platform]
-                ? platform === "windows"
-                  ? "Download installer"
-                  : "Download helper"
-                : "Preparing download…"}
-            </a>
-            <small className="helper-source">
-              From{" "}
-              <a href={HELPER_RELEASE} target="_blank" rel="noreferrer">
-                GitHub Releases
+        {!local && (
+          <ol className="helper-steps">
+            <li>
+              <strong>Download</strong>
+              <select
+                aria-label="Helper operating system"
+                value={platform}
+                onChange={(event) =>
+                  setPlatform(event.target.value as typeof platform)
+                }
+              >
+                <option value="windows">Windows</option>
+                <option value="mac">Mac</option>
+                <option value="linux">Linux</option>
+              </select>
+              <a
+                className="primary-button"
+                aria-disabled={!downloads[platform]}
+                onClick={(event) => {
+                  if (!downloads[platform]) event.preventDefault();
+                }}
+                href={
+                  downloads[platform] ? helperDownloads[platform] : undefined
+                }
+              >
+                <Download size={16} />
+                {downloads[platform]
+                  ? "Download helper"
+                  : "Preparing download…"}
               </a>
-              , built by GitHub Actions from this{" "}
-              <a href={HELPER_SOURCE} target="_blank" rel="noreferrer">
-                open-source repository
-              </a>
-              .
-              {platform === "windows" && downloads.windowsPortable && (
-                <>
-                  {" "}
-                  <a href={helperDownloads.windowsPortable}>Portable .exe</a> if
-                  you would rather not install.
-                </>
-              )}
-            </small>
-          </li>
-          <li>
-            <strong>Open the download</strong>
-            <p>
-              {platform === "mac"
-                ? "Unzip and open MusicDownloader Helper."
-                : platform === "linux"
-                  ? "Extract and open MusicDownloader-Helper."
-                  : "Run the installer. It adds MusicDownloader Helper to your Start menu and replaces an older installed version, then opens it."}{" "}
-              Keep it running while you download.
-            </p>
-            <small>
-              {platform === "windows"
-                ? "If Windows warns: More info → Run anyway."
-                : platform === "mac"
-                  ? "If blocked: System Settings → Privacy & Security → Open Anyway."
-                  : "Your system may ask you to allow this unsigned helper."}
-            </small>
-          </li>
-          <li>
-            <strong>Allow the browser connection</strong>
-            <p>
-              The helper opens this app and pairs automatically. Approve local
-              network access if your browser asks.
-            </p>
-          </li>
-        </ol>
+              <small className="helper-source">
+                From{" "}
+                <a href={HELPER_RELEASE} target="_blank" rel="noreferrer">
+                  GitHub Releases
+                </a>
+                , built by GitHub Actions from this{" "}
+                <a href={HELPER_SOURCE} target="_blank" rel="noreferrer">
+                  open-source repository
+                </a>
+                .
+              </small>
+            </li>
+            <li>
+              <strong>Open the download</strong>
+              <p>
+                {platform === "mac"
+                  ? "Unzip and open MusicDownloader Helper."
+                  : platform === "linux"
+                    ? "Extract and open MusicDownloader-Helper."
+                    : "Open it. It runs right away, and can add itself to your Start menu."}{" "}
+                Keep it running while you download.
+              </p>
+              <small>
+                {platform === "windows"
+                  ? "If Windows warns: More info → Run anyway."
+                  : platform === "mac"
+                    ? "If blocked: System Settings → Privacy & Security → Open Anyway."
+                    : "Your system may ask you to allow this unsigned helper."}
+              </small>
+            </li>
+            <li>
+              <strong>Allow the browser connection</strong>
+              <p>
+                The helper opens its own copy of this app, running entirely on
+                your computer, and pairs automatically.
+              </p>
+            </li>
+          </ol>
+        )}
         {status && (
           <p className="helper-status" role="status">
             {checking ? (
@@ -215,6 +227,38 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
             <Check size={15} />
           )}
         </button>
+        {ready && install.available && !install.current && (
+          <button
+            className="secondary-button full-width"
+            disabled={installing}
+            onClick={async () => {
+              setInstalling(true);
+              try {
+                const response = await helperFetch("/install", {
+                  method: "POST",
+                });
+                const value = await response.json();
+                if (!response.ok) throw new Error(value.detail);
+                setInstall(value);
+                setStatus(
+                  "Installed. Open MusicDownloader Helper from your Start menu next time.",
+                );
+              } catch (error) {
+                setStatus(
+                  error instanceof Error
+                    ? error.message
+                    : "Could not install the helper.",
+                );
+              } finally {
+                setInstalling(false);
+              }
+            }}
+          >
+            {install.installed
+              ? "Update the installed helper with this one"
+              : "Add to Start menu"}
+          </button>
+        )}
         {ready && <Accounts />}
         <button
           className="text-button"

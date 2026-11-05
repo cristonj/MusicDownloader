@@ -81,9 +81,7 @@ export default function Feed({
     const notice =
       !term && provider === "SoundCloud"
         ? "SoundCloud publishes no public chart. Search for an artist or song."
-        : term && provider === "Spotify"
-          ? "Spotify search needs an account. Its public chart is available when you clear the search."
-          : undefined;
+        : undefined;
     if (notice) {
       setColumns((state) => ({
         ...state,
@@ -256,9 +254,7 @@ export default function Feed({
                   <small>
                     {state.column?.title ||
                       (state.notice
-                        ? search
-                          ? "Chart only"
-                          : "Search available"
+                        ? "Search available"
                         : state.error
                           ? "Unavailable"
                           : search
@@ -321,16 +317,11 @@ export default function Feed({
                   <p>{state.notice}</p>
                   <button
                     onClick={() => {
-                      if (search) {
-                        setQuery("");
-                        runSearch("");
-                      } else {
-                        setFocused(provider);
-                        searchInput.current?.focus();
-                      }
+                      setFocused(provider);
+                      searchInput.current?.focus();
                     }}
                   >
-                    {search ? "Show charts" : `Search ${provider}`}
+                    {`Search ${provider}`}
                   </button>
                 </div>
               )}

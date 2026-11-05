@@ -76,7 +76,10 @@ async function extractUncached(
     args.push(
       "--flat-playlist",
       "--playlist-end",
-      String(MAX_TRACKS + 1),
+      // A song search only needs its top results, and pages for many seconds.
+      url.startsWith("https://music.youtube.com/search")
+        ? "5"
+        : String(MAX_TRACKS + 1),
       "--ignore-no-formats-error",
     );
   else args.push("--no-playlist");

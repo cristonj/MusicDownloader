@@ -1983,7 +1983,7 @@ input[type="checkbox"]:checked {
 /* Discover feed: one card per service, side by side on a desktop width. */
 .wide-shell .topbar,
 .wide-shell main {
-  max-width: 1340px;
+  max-width: 1760px;
 }
 .wide-shell main {
   padding-left: 44px;
@@ -2115,8 +2115,8 @@ input[type="checkbox"]:checked {
 }
 .feed-grid {
   display: grid;
-  /* Wide enough that a song's name fits on the two lines it has. */
-  grid-template-columns: repeat(auto-fit, minmax(372px, 1fr));
+  /* Every service side by side on a desktop; narrow cards tighten their rows. */
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -2130,6 +2130,20 @@ input[type="checkbox"]:checked {
   flex-direction: column;
   /* Every service gets the same frame, whatever its list looks like. */
   height: 616px;
+  container-type: inline-size;
+}
+/* Keep room for a song's name on the two lines it has. */
+@container (max-width: 340px) {
+  .feed-card li {
+    gap: 8px;
+  }
+  .feed-rank {
+    display: none;
+  }
+  .feed-art {
+    width: 40px;
+    height: 40px;
+  }
 }
 .feed-card > header,
 .feed-skeletons,

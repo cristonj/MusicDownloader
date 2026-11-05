@@ -27,7 +27,10 @@ export function parseMeasurement(log: string, bytes: number): AudioMeasurement {
   const seconds = duration
     ? +duration[1] * 3600 + +duration[2] * 60 + +duration[3]
     : undefined;
-  const stream = log.match(/Audio: ([\w]+)[^\n]*?, (\d+) Hz, ([^,\n]+)/);
+  // The output section describes FFmpeg's decoded PCM, not this file: Opus in
+  // WebM lists no stream bitrate, which would otherwise report 1536 kb/s.
+  const input = log.split(/Output #\d+/)[0];
+  const stream = input.match(/Audio: ([\w]+)[^\n]*?, (\d+) Hz, ([^,\n]+)/);
   const last = (pattern: RegExp) => {
     const hits = [...log.matchAll(pattern)];
     const value = hits.at(-1)?.[1];
@@ -55,7 +58,7 @@ export function parseMeasurement(log: string, bytes: number): AudioMeasurement {
     // Prefer the audio stream bitrate; otherwise an explicitly approximate
     // file average, which includes container overhead (especially for PCM).
     bitrateKbps: stream
-      ? Number(log.match(/Audio: [^\n]*?, ([\d.]+) kb\/s/)?.[1]) ||
+      ? Number(input.match(/Audio: [^\n]*?, ([\d.]+) kb\/s/)?.[1]) ||
         (seconds ? (bytes * 8) / seconds / 1000 : undefined)
       : undefined,
     integratedLufs: last(/\bI:\s*(-?(?:[\d.]+|inf)) LUFS/g),

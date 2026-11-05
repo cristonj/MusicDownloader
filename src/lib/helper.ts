@@ -1,9 +1,13 @@
 export const HELPER_PORT = 45821;
 // Bump with helper/server.ts when the helper needs a fix the app relies on.
-export const HELPER_VERSION = 6;
+export const HELPER_VERSION = 7;
 export const helperOutdated = (health: { version?: unknown }) =>
   typeof health.version !== "number" || health.version < HELPER_VERSION;
 const KEY = "music-downloader:helper";
+// The helper serves this same app from its own address.
+export const isLocalApp = () => location.hostname === "127.0.0.1";
+const validPort = (port: unknown) =>
+  port === HELPER_PORT || (isLocalApp() && port === Number(location.port));
 export class HelperRequiredError extends Error {}
 interface Connection {
   token: string;
@@ -14,7 +18,7 @@ export function helperConnection(): Connection | null {
     const value = JSON.parse(localStorage.getItem(KEY) || "null");
     return value &&
       /^[A-Za-z0-9_-]{43}$/.test(value.token) &&
-      value.port === HELPER_PORT
+      validPort(value.port)
       ? value
       : null;
   } catch {
@@ -25,7 +29,7 @@ export function consumeHelperPair(): boolean {
   const params = new URLSearchParams(location.hash.slice(1));
   const token = params.get("helper_token"),
     port = Number(params.get("helper_port"));
-  if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token) || port !== HELPER_PORT)
+  if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token) || !validPort(port))
     return false;
   localStorage.setItem(KEY, JSON.stringify({ token, port }));
   history.replaceState(null, "", location.pathname + location.search);
@@ -44,7 +48,7 @@ export async function helperFetch(
   if (!connection)
     throw new HelperRequiredError("Open the desktop helper to connect.");
   if (
-    !/^\/(?:api\/(?:resolve|match|lookup|feed|audio|media)(?:\?|$)|health$|accounts$|quit$)/.test(
+    !/^\/(?:api\/(?:resolve|match|lookup|feed|audio|media)(?:\?|$)|health$|accounts$|install$|quit$)/.test(
       path,
     )
   )
@@ -82,8 +86,6 @@ export const HELPER_RELEASE =
 export const HELPER_SOURCE = "https://github.com/cristonj/MusicDownloader";
 export const helperDownloads = {
   windows:
-    "https://github.com/cristonj/MusicDownloader/releases/download/helper-v1/MusicDownloader-Helper-Windows-Setup.exe",
-  windowsPortable:
     "https://github.com/cristonj/MusicDownloader/releases/download/helper-v1/MusicDownloader-Helper-Windows.exe",
   mac: "https://github.com/cristonj/MusicDownloader/releases/download/helper-v1/MusicDownloader-Helper-Mac.zip",
   linux:

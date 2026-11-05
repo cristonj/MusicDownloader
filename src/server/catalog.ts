@@ -63,6 +63,17 @@ const tidy = (value: string) =>
     .replace(TRAILING_TAG, "")
     .replace(/[\s|,·-]+$/, "")
     .trim();
+const words = (s: string) =>
+  new Set(s.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+const sameName = (a: string, b: string) => {
+  const left = words(a),
+    right = words(b);
+  return (
+    left.size > 0 &&
+    left.size === right.size &&
+    [...left].every((x) => right.has(x))
+  );
+};
 export function songName(title: string, artist: string) {
   let name = tidy(title);
   const segments = name.split(/\s*\|\s*/).filter(Boolean);
@@ -76,6 +87,14 @@ export function songName(title: string, artist: string) {
   const credited = name.match(/^(.+?)\s+[-–—]\s+(.+)$/);
   if (credited) {
     const song = tidy(credited[2]);
+    const before = tidy(credited[1]);
+    // "Song - Artist", when the uploader's own name follows the dash.
+    if (
+      before.length >= 2 &&
+      sameName(song, artist) &&
+      !sameName(before, artist)
+    )
+      return { title: before, artist: song };
     // "Artist - Song", unless what follows the dash was only a format tag.
     if (song.length >= 2 && !TAG_ONLY.test(song))
       return { title: song, artist: tidy(credited[1]) || artist };
@@ -84,8 +103,6 @@ export function songName(title: string, artist: string) {
   }
   return { title: name || title, artist };
 }
-const words = (s: string) =>
-  new Set(s.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
 export function matchScore(
   title: string,
   artist: string,
@@ -153,12 +170,7 @@ export const DRM_MESSAGE =
 // The names to search other providers with when the source refuses the audio.
 // SoundCloud uploads often title tracks "Artist - Title".
 function searchNames(track: CatalogTrack) {
-  const credited = track.title.match(/^(.+?) [-–—] (.+)$/);
-  return {
-    title: credited ? credited[2] : track.title,
-    artist: credited ? credited[1] : track.artist,
-    duration: track.duration,
-  };
+  return { ...songName(track.title, track.artist), duration: track.duration };
 }
 export function catalogTrack(
   entry: Extracted,
@@ -287,8 +299,16 @@ export async function lookupTrack(url: string, signal?: AbortSignal) {
 }
 // Spotify supplies names, not audio, and a source can refuse its own audio
 // (DRM, removal, blocks). Pick the upload most likely to be the same recording
-// and say why, so the listener can verify it. Broader YouTube searches, then
-// SoundCloud, run only when the narrower ones find nothing close.
+// and say why, so the listener can verify it. YouTube Music's song listings come
+// first: they carry the released recording, where a general search favours the
+// music video's own edit. A fan upload never ends the search early, and
+// SoundCloud runs only when YouTube has nothing close.
+const MUSIC_SEARCH = "music";
+const MATCH_BUDGET_MS = 30000;
+// Spotify appends a remaster note that other services' listings word differently
+// or leave out, and its words would otherwise fail the title comparison.
+const REMASTER_NOTE =
+  /\s+-\s+(?:\d{4}\s+)?(?:digital(?:ly)?\s+)?remaster(?:ed)?(?:\s+(?:version|\d{4}))?\s*$/i;
 export async function matchTrack(
   track: { title: string; artist: string; duration?: number },
   signal?: AbortSignal,
@@ -296,30 +316,74 @@ export async function matchTrack(
   // Uploads that already failed to download, so the next best is chosen.
   exclude: string[] = [],
 ): Promise<CatalogTrack> {
+  const title = track.title.replace(REMASTER_NOTE, "") || track.title;
+  const named = { ...track, title };
   const queries = [
-    `${track.artist} ${track.title} official audio`,
-    `${track.artist} ${track.title}`,
-    `${track.title} ${track.artist} audio`,
+    `${track.artist} ${title} official audio`,
+    `${track.artist} ${title}`,
+    `${title} ${track.artist} audio`,
     // Re-uploaders often post under their own name rather than the artist's.
-    track.title,
+    title,
   ].map((q) => `ytsearch10:${q.trim().replace(/\s+/g, " ")}`);
-  queries.push(`scsearch10:${track.artist} ${track.title}`.trim());
-  let failed = false;
+  queries.unshift(MUSIC_SEARCH);
+  queries.push(`scsearch10:${track.artist} ${title}`.trim());
+  const started = Date.now();
+  let failed = false,
+    best: CatalogTrack | undefined;
   for (const query of [...new Set(queries)]) {
+    if (
+      best &&
+      (query.startsWith("scsearch") || Date.now() - started > MATCH_BUDGET_MS)
+    )
+      break;
     try {
-      const match = await matchQuery(track, query, origin, exclude, signal);
-      if (match) return match;
+      const found = await matchQuery(named, query, origin, exclude, signal);
+      const match = found && { ...found, title: track.title };
+      if (match?.matchConfident) return match;
+      if (match && (match.matchConfidence || 0) > (best?.matchConfidence || 0))
+        best = match;
     } catch {
       if (signal?.aborted) break;
       failed = true;
     }
   }
+  if (best) return best;
   return {
     ...track,
     error: failed
       ? "Matching is temporarily unavailable. Re-import this track to try again."
       : "No close audio match found. Add a source link for this track.",
   };
+}
+// Song listings name only the title, so the closest few are read in full for
+// their channel, length, and audio formats.
+async function musicCandidates(
+  track: { title: string; artist: string },
+  signal?: AbortSignal,
+): Promise<Extracted[]> {
+  const search = `${track.artist} ${track.title}`.trim();
+  const found = await extract(
+    `https://music.youtube.com/search?q=${encodeURIComponent(search)}#songs`,
+    true,
+    signal,
+  );
+  const target = words(track.title);
+  const closest = (found.entries || [])
+    .filter((x) => {
+      const title = words(x.title || "");
+      return (
+        /^[a-zA-Z0-9_-]{11}$/.test(x.id || "") &&
+        [...target].filter((word) => title.has(word)).length >=
+          target.size * 0.65
+      );
+    })
+    .slice(0, 3);
+  const full = await Promise.allSettled(
+    closest.map((x) =>
+      extract(`https://www.youtube.com/watch?v=${x.id}`, false, signal),
+    ),
+  );
+  return full.flatMap((x) => (x.status === "fulfilled" ? [x.value] : []));
 }
 async function matchQuery(
   track: { title: string; artist: string; duration?: number },
@@ -328,8 +392,11 @@ async function matchQuery(
   exclude: string[],
   signal?: AbortSignal,
 ): Promise<CatalogTrack | undefined> {
-  const youtube = query.startsWith("ytsearch");
-  const found = await extract(query, true, signal);
+  const youtube = !query.startsWith("scsearch");
+  const entries =
+    query === MUSIC_SEARCH
+      ? await musicCandidates(track, signal)
+      : (await extract(query, true, signal)).entries;
   const link = (x: Extracted) =>
     youtube
       ? /^[a-zA-Z0-9_-]{11}$/.test(x.id || "")
@@ -339,10 +406,22 @@ async function matchQuery(
           /^https:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/?#]+\/[^/?#]+$/,
         )?.[0];
   const artists = words(track.artist);
+  // Topic and VEVO channels exist for every release, including covers of this
+  // song, so one counts only when it belongs to a credited artist.
+  const credited = track.artist
+    .split(/\s*(?:,|&|\bfeat\.?|\bft\.?|\bx\b)\s*/i)
+    .map(words)
+    .filter((name) => name.size);
   const official = (x: Extracted) => {
     const channel = (x.channel || x.uploader || "").toLocaleLowerCase();
-    if (/ - topic$/.test(channel)) return "the artist’s official audio channel";
-    if (/vevo$/.test(channel)) return "the artist’s VEVO channel";
+    const theirs =
+      !credited.length ||
+      credited.some((name) => [...name].every((w) => channel.includes(w)));
+    if (/ - topic$/.test(channel))
+      return theirs ? "the artist’s official audio channel" : "";
+    if (/vevo$/.test(channel)) return theirs ? "the artist’s VEVO channel" : "";
+    if (credited.some((name) => sameName([...name].join(" "), channel)))
+      return "the artist’s channel";
     if (
       artists.size &&
       [...words(channel)].filter((w) => artists.has(w)).length >=
@@ -358,7 +437,7 @@ async function matchQuery(
       Math.abs(track.duration - x.duration) <=
         Math.max(3, track.duration * 0.03),
     );
-  const scored = (found.entries || [])
+  const scored = (entries || [])
     .filter(
       (x) =>
         !x.is_live &&
@@ -381,7 +460,8 @@ async function matchQuery(
       // Rank unclamped so official uploads win ties at the top.
       return { x, score };
     })
-    .sort((a, b) => b.score - a.score);
+    // Equally likely recordings are separated by the audio they offer.
+    .sort((a, b) => b.score - a.score || (b.x.abr || 0) - (a.x.abr || 0));
   const best = scored[0];
   if (!best || best.score < 0.58) return undefined;
   const channel = best.x.channel || best.x.uploader || "";

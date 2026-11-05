@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, sep } from "node:path";
@@ -7,6 +8,12 @@ import { spawn, execFileSync } from "node:child_process";
 import { prepareMediaTools } from "../scripts/media-tools.mjs";
 import { startHelper, HELPER_PORT } from "./server";
 import { enableLocalAccounts } from "./accounts";
+import {
+  installHelper,
+  installPaths,
+  installState,
+  uninstallHelper,
+} from "./install";
 const APP = "https://musicdownloaderapp.netlify.app";
 async function main() {
   // pkg's embedded Node runtime doubles as yt-dlp's JavaScript engine. Users
@@ -47,13 +54,25 @@ async function main() {
       ).trim();
       if (!/^22\./.test(nodeVersion) || !/^2026\./.test(version))
         throw new Error("Bundled runtime check failed.");
-      console.log("Bundled Node and download tool work with an empty PATH.");
+      if (!existsSync(join(__dirname, "assets", "app", "index.html")))
+        throw new Error("The bundled app is missing.");
+      console.log(
+        "Bundled Node, app, and download tool work with an empty PATH.",
+      );
     } finally {
       process.chdir(previous);
       await rm(temporary, { recursive: true, force: true });
     }
     return;
   }
+  if (process.argv.includes("--uninstall")) {
+    const paths = installPaths();
+    if (paths) await uninstallHelper(paths);
+    return;
+  }
+  const portFlag = process.argv.indexOf("--port");
+  const port = portFlag > 0 ? Number(process.argv[portFlag + 1]) : HELPER_PORT;
+  const appDir = join(__dirname, "assets", "app");
   const home = join(homedir(), ".musicdownloader");
   await mkdir(home, { recursive: true, mode: 0o700 });
   process.chdir(home);
@@ -64,8 +83,18 @@ async function main() {
     await startHelper({
       token,
       origin: APP,
+      port,
       state: () => state,
       onQuit: () => process.exit(0),
+      appDir: existsSync(appDir) ? appDir : undefined,
+      install: {
+        state: () => installState(),
+        run: async () => {
+          const paths = installPaths();
+          if (!paths) throw new Error("Unavailable.");
+          return installHelper(paths, process.env.HELPER_VERSION);
+        },
+      },
     });
   } catch (error) {
     console.error(
@@ -74,7 +103,9 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const paired = `${APP}/#helper_token=${token}&helper_port=${HELPER_PORT}`;
+  const pairing = `#helper_token=${token}&helper_port=${port}`;
+  // The app comes from this computer. The hosted page remains an alternative.
+  const paired = `${existsSync(appDir) ? `http://127.0.0.1:${port}/` : `${APP}/`}${pairing}`;
   const command =
     process.platform === "win32"
       ? ["rundll32.exe", ["url.dll,FileProtocolHandler", paired]]
@@ -84,15 +115,19 @@ async function main() {
   console.log(
     "MusicDownloader helper is running. Keep it open while downloading.",
   );
+  console.log(`App: ${paired}`);
   try {
-    spawn(command[0] as string, command[1] as string[], {
-      detached: true,
-      stdio: "ignore",
-    })
-      .on("error", () =>
-        console.log(`Open this address in your browser to connect:\n${paired}`),
-      )
-      .unref();
+    if (!process.argv.includes("--no-open"))
+      spawn(command[0] as string, command[1] as string[], {
+        detached: true,
+        stdio: "ignore",
+      })
+        .on("error", () =>
+          console.log(
+            `Open this address in your browser to connect:\n${paired}`,
+          ),
+        )
+        .unref();
   } catch {
     console.log(`Open this address in your browser to connect:\n${paired}`);
   }

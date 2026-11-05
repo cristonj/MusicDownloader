@@ -7,6 +7,7 @@ import {
   type CatalogTrack,
 } from "./catalog";
 import { artworkSearch, itunesSearch } from "./apple";
+import { spotifySearch } from "./spotify-search";
 import type { Provider } from "@/lib/model";
 // Services whose own front page is public. Amazon Music and Bandcamp publish
 // neither a chart nor a search anyone can read without an account.
@@ -99,15 +100,13 @@ async function readFeed(
       ),
     };
   }
-  if (provider === "Spotify")
-    throw new HttpError(
-      422,
-      "Spotify's search needs an account, so only its chart is shown here. Paste a Spotify link to import anything else.",
-    );
-  if (provider === "Apple Music") {
-    const songs = await itunesSearch(query, limit);
+  if (provider === "Spotify" || provider === "Apple Music") {
+    const songs =
+      provider === "Spotify"
+        ? await spotifySearch(query, limit, signal)
+        : await itunesSearch(query, limit);
     if (!songs.length)
-      throw new HttpError(422, "Apple Music found nothing for that search.");
+      throw new HttpError(422, `${provider} found nothing for that search.`);
     return {
       title: query,
       tracks: songs.map((track) => ({

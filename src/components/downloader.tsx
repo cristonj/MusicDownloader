@@ -1057,8 +1057,9 @@ export default function Downloader() {
                   <p className="settings-note">
                     YouTube, Spotify, and Apple Music publish a chart anyone can
                     read; YouTube, Apple Music, and SoundCloud also publish a
-                    search. Amazon Music and Bandcamp publish neither without an
-                    account, so they have no column.
+                    search, and Spotify's opens in Edge or Chrome on your
+                    computer through the helper. Amazon Music and Bandcamp publish
+                    neither without an account, so they have no column.
                   </p>
                 </div>
                 <div className="settings-section">
