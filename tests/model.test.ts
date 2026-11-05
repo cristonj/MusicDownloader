@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   conversionArgs,
+  resampleFilter,
   defaults,
   outputFilename,
   parseUrl,
@@ -30,7 +31,7 @@ describe("source boundaries", () => {
 });
 describe("export decisions", () => {
   it("does not transcode originals", () =>
-    expect(conversionArgs(defaults)).toEqual([]));
+    expect(conversionArgs({ ...defaults, format: "original" })).toEqual([]));
   it("uses real codecs and honors sample rate and bit depth", () => {
     expect(
       conversionArgs({ ...defaults, format: "mp3", bitrate: "192" }),
@@ -49,9 +50,7 @@ describe("export decisions", () => {
       "-c:a",
       "pcm_s24le",
       "-af",
-      "aresample=dither_method=triangular",
-      "-ar",
-      "96000",
+      `${resampleFilter("96000")},aresample=dither_method=triangular`,
     ]);
     expect(
       conversionArgs({ ...defaults, format: "opus", sampleRate: "96000" }),
@@ -67,10 +66,22 @@ describe("export decisions", () => {
       ),
     ).toBe("Artist - Song_One.mp3");
   });
+  it("turns peak protection on for settings saved before it was the default", () => {
+    expect(readPreferences('{"preventClipping":false}').preventClipping).toBe(true);
+    expect(
+      readPreferences('{"prefsVersion":2,"preventClipping":false}').preventClipping,
+    ).toBe(false);
+  });
   it("ignores corrupt or unsupported saved settings", () => {
     expect(readPreferences("{")).toEqual(defaults);
     expect(readPreferences('{"format":"exe","bitrate":"1000000"}')).toEqual(
       defaults,
     );
+  });
+  it("upgrades the old original default to protected FLAC and retains a new explicit original choice", () => {
+    expect(readPreferences(JSON.stringify({ format: "original", prefsVersion: 2,
+      bitDepth: "16", sampleRate: "96000", preventClipping: false,
+    }))).toMatchObject({ format: "flac", bitDepth: "24", sampleRate: "source", preventClipping: true });
+    expect(readPreferences(JSON.stringify({ ...defaults, format: "original" })).format).toBe("original");
   });
 });

@@ -20,6 +20,7 @@ export type Format =
   | "aiff";
 export type TrackStatus =
   | "ready"
+  | "matching"
   | "fetching"
   | "converting"
   | "done"
@@ -63,16 +64,25 @@ export interface Preferences {
   sampleRate: "source" | "44100" | "48000" | "96000";
   bitDepth: "16" | "24";
   preventClipping?: boolean;
+  // Which defaults the saved choices were made under.
+  prefsVersion?: number;
 }
 export const defaults: Preferences = {
-  format: "original",
+  format: "flac",
   feed: false,
   feedHidden: [],
   bitrate: "320",
   sampleRate: "source",
   bitDepth: "24",
-  preventClipping: false,
+  // Lossy streams routinely decode above full scale (measured up to +3.2 dB on
+  // commercial tracks), which an integer export or a player would clip.
+  preventClipping: true,
+  prefsVersion: 3,
 };
+// FFmpeg's default resampler leaves a 44.1-to-48 kHz image at -23 dB and rolls
+// off by -3.6 dB at 21.5 kHz; these settings measure -61 dB and -0.04 dB.
+export const resampleFilter = (rate: number | string) =>
+  `aresample=${rate}:filter_size=256:phase_shift=14:linear_interp=1:cutoff=0.99:filter_type=kaiser:kaiser_beta=16:internal_sample_fmt=dblp`;
 export const formats: { value: Format; label: string; note: string }[] = [
   { value: "original", label: "Original", note: "Fastest · no conversion" },
   { value: "mp3", label: "MP3", note: "Plays everywhere" },
@@ -103,6 +113,7 @@ export const ARTWORK_HOSTS = [
   "sndcdn.com",
   "mzstatic.com",
   "scdn.co",
+  "dzcdn.net",
   "tiktokcdn.com",
   "tiktokcdn-us.com",
 ];
@@ -277,17 +288,19 @@ export function conversionArgs(prefs: Preferences): string[] {
   if (prefs.format === "original") return [];
   if (prefs.format === "mp3" && prefs.sampleRate === "96000")
     throw new Error("MP3 supports up to 48 kHz. Choose Source or 48 kHz.");
+  const filters = [
+    ...(prefs.sampleRate !== "source" && prefs.format !== "opus"
+      ? [resampleFilter(prefs.sampleRate)]
+      : []),
+    // Quantization comes last, after any resampling.
+    ...(isLossless(prefs.format) ? ["aresample=dither_method=triangular"] : []),
+  ];
   return [
     "-map",
     "0:a:0",
     "-vn",
     ...codecs[prefs.format],
-    ...(isLossless(prefs.format)
-      ? ["-af", "aresample=dither_method=triangular"]
-      : []),
-    ...(prefs.sampleRate !== "source" && prefs.format !== "opus"
-      ? ["-ar", prefs.sampleRate]
-      : []),
+    ...(filters.length ? ["-af", filters.join(",")] : []),
   ];
 }
 export function isLossless(format: Format) {
@@ -296,8 +309,11 @@ export function isLossless(format: Format) {
 export function readPreferences(value: string | null): Preferences {
   try {
     const p = JSON.parse(value || "{}");
+    // Move the former automatically saved Original default to protected FLAC.
+    // A subsequent explicit Original choice is retained under version 3.
+    const upgradeOriginal = p.format === "original" && !(p.prefsVersion >= 3);
     return {
-      format: formats.some((f) => f.value === p.format)
+      format: !upgradeOriginal && formats.some((f) => f.value === p.format)
         ? p.format
         : defaults.format,
       feed: typeof p.feed === "boolean" ? p.feed : defaults.feed,
@@ -313,11 +329,20 @@ export function readPreferences(value: string | null): Preferences {
       bitrate: ["128", "192", "256", "320"].includes(p.bitrate)
         ? p.bitrate
         : defaults.bitrate,
-      sampleRate: ["source", "44100", "48000", "96000"].includes(p.sampleRate)
+      sampleRate: !upgradeOriginal &&
+        ["source", "44100", "48000", "96000"].includes(p.sampleRate)
         ? p.sampleRate
         : defaults.sampleRate,
-      preventClipping: p.preventClipping === true,
-      bitDepth: ["16", "24"].includes(p.bitDepth)
+      // A choice saved before protection became the default was never made:
+      // every browser stored the old default automatically.
+      preventClipping:
+        !upgradeOriginal &&
+        p.prefsVersion >= 2 &&
+        typeof p.preventClipping === "boolean"
+          ? p.preventClipping
+          : defaults.preventClipping,
+      prefsVersion: defaults.prefsVersion,
+      bitDepth: !upgradeOriginal && ["16", "24"].includes(p.bitDepth)
         ? p.bitDepth
         : defaults.bitDepth,
     };

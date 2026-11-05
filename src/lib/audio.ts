@@ -1,5 +1,10 @@
 import type { FFmpeg } from "@ffmpeg/ffmpeg";
-import { conversionArgs, type Preferences, type Track } from "./model";
+import {
+  conversionArgs,
+  resampleFilter,
+  type Preferences,
+  type Track,
+} from "./model";
 // Each engine is its own worker, so several tracks convert in parallel on
 // multi-core devices. Engines are reused across tracks once loaded.
 export const CONVERSION_SLOTS =
@@ -184,17 +189,28 @@ export async function convertAudio(
     );
     const original = prefs.format === "original";
     const protect = !original && prefs.preventClipping;
+    const inputMeasurement = protect
+      ? await measureFile(ffmpeg, inputName, input.size)
+      : undefined;
+    if (
+      protect &&
+      inputMeasurement?.truePeakDbtp !== -Infinity &&
+      !Number.isFinite(inputMeasurement?.truePeakDbtp)
+    )
+      throw new Error(
+        "Could not measure the source peaks for protected export. Try another source.",
+      );
     let gain = protect
-      ? headroomAdjustment(
-          (await measureFile(ffmpeg, inputName, input.size)).truePeakDbtp,
-          -1.2,
-        )
+      ? headroomAdjustment(inputMeasurement?.truePeakDbtp, -1.2)
       : 0;
     let result: Uint8Array<ArrayBuffer> | undefined;
     let measured: AudioMeasurement | undefined;
     for (let pass = 0; pass < (protect ? 3 : 1); pass++) {
       const filters = [
         ...(gain < 0 ? [`volume=${gain.toFixed(6)}dB:precision=double`] : []),
+        ...(prefs.sampleRate !== "source" && outputFormat !== "opus" && !original
+          ? [resampleFilter(prefs.sampleRate)]
+          : []),
         ...(["flac", "wav", "aiff"].includes(outputFormat)
           ? [
               `aresample=dither_method=triangular:output_sample_bits=${prefs.bitDepth}`,
@@ -222,7 +238,8 @@ export async function convertAudio(
       if (!original && outputFormat === "opus") {
         // Decode/resample in float, then encode with modern libopus in a
         // separate worker. No unstable FFmpeg libopus/native-Opus workaround.
-        const inputInfo = await measureFile(ffmpeg, inputName, input.size);
+        const inputInfo =
+          inputMeasurement || await measureFile(ffmpeg, inputName, input.size);
         if (inputInfo.channels && inputInfo.channels > 2)
           throw new Error(
             "Opus export supports mono or stereo. Choose Original to preserve surround audio.",
@@ -235,11 +252,11 @@ export async function convertAudio(
           "-map",
           "0:a:0",
           "-vn",
-          ...(gain < 0
-            ? ["-af", `volume=${gain.toFixed(6)}dB:precision=double`]
-            : []),
-          "-ar",
-          "48000",
+          "-af",
+          [
+            ...(gain < 0 ? [`volume=${gain.toFixed(6)}dB:precision=double`] : []),
+            resampleFilter(48000),
+          ].join(","),
           "-ac",
           String(channels),
           "-c:a",

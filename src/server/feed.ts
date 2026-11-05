@@ -8,6 +8,8 @@ import {
 } from "./catalog";
 import { artworkSearch, itunesSearch } from "./apple";
 import { spotifySearch } from "./spotify-search";
+import { deezerSearch } from "./deezer";
+import { discoverSet } from "./soundcloud";
 import type { Provider } from "@/lib/model";
 // Services whose own front page is public. Amazon Music and Bandcamp publish
 // neither a chart nor a search anyone can read without an account.
@@ -85,6 +87,10 @@ async function readFeed(
   signal?: AbortSignal,
 ): Promise<Feed> {
   if (!query) {
+    if (provider === "SoundCloud") {
+      const trending = await discoverSet(undefined, limit, signal);
+      return { title: trending.title, tracks: asSongs(trending.tracks) };
+    }
     const chart = CHARTS[provider];
     if (!chart)
       throw new HttpError(
@@ -101,14 +107,26 @@ async function readFeed(
     };
   }
   if (provider === "Spotify" || provider === "Apple Music") {
-    const songs =
-      provider === "Spotify"
-        ? await spotifySearch(query, limit, signal)
-        : await itunesSearch(query, limit);
+    let title = query,
+      songs;
+    if (provider === "Apple Music") songs = await itunesSearch(query, limit);
+    else {
+      try {
+        songs = await spotifySearch(query, limit, signal);
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        // Spotify supplies only names here, so a public catalog can stand in.
+        // The column says so rather than passing them off as Spotify's.
+        songs = await deezerSearch(query, limit, signal).catch(() => {
+          throw error;
+        });
+        title = `${query} · Spotify unavailable, showing Deezer's catalog`;
+      }
+    }
     if (!songs.length)
       throw new HttpError(422, `${provider} found nothing for that search.`);
     return {
-      title: query,
+      title,
       tracks: songs.map((track) => ({
         ...track,
         matchTicket: signTicket({ kind: "match", ...track, origin: provider }),

@@ -8,6 +8,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { prepareMediaTools } from "../scripts/media-tools.mjs";
 import { startHelper, HELPER_PORT } from "./server";
 import { enableLocalAccounts } from "./accounts";
+import { ExtensionBridge, prepareExtension, openExtensionSetup } from "./extension";
 import {
   installHelper,
   installPaths,
@@ -56,6 +57,8 @@ async function main() {
         throw new Error("Bundled runtime check failed.");
       if (!existsSync(join(__dirname, "assets", "app", "index.html")))
         throw new Error("The bundled app is missing.");
+      const extension = await prepareExtension(join(__dirname, "assets", "extension"), temporary);
+      if (!existsSync(join(extension, "manifest.json"))) throw new Error("The bundled extension is missing.");
       console.log(
         "Bundled Node, app, and download tool work with an empty PATH.",
       );
@@ -77,6 +80,12 @@ async function main() {
   await mkdir(home, { recursive: true, mode: 0o700 });
   process.chdir(home);
   enableLocalAccounts();
+  const extensionSource = join(__dirname, "assets", "extension");
+  const extensionDir = existsSync(extensionSource)
+    ? await prepareExtension(extensionSource, home) : undefined;
+  const bridge = extensionDir ? new ExtensionBridge(home) : undefined;
+  // Temporary session jars do not survive a clean helper shutdown.
+  process.once("exit", () => bridge?.close());
   const token = randomBytes(32).toString("base64url");
   let state: { ready: boolean; error?: string } = { ready: false };
   try {
@@ -87,6 +96,10 @@ async function main() {
       state: () => state,
       onQuit: () => process.exit(0),
       appDir: existsSync(appDir) ? appDir : undefined,
+      extension: bridge && extensionDir ? {
+        bridge, directory: extensionDir,
+        open: (browser) => openExtensionSetup(browser, extensionDir),
+      } : undefined,
       install: {
         state: () => installState(),
         run: async () => {

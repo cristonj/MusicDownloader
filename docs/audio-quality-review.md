@@ -4,7 +4,9 @@ Prepared 4 November 2026. Scope: MusicDownloader's source selection, browser exp
 
 ## Executive assessment
 
-The release removes avoidable quality losses and misleading export behavior. Its default preserves the best audio the extractor can obtain, without another lossy encode, resampling, normalization, or gain adjustment. Optional conversion now has observable output quality and a verified peak-protection mode. Account access can improve the source available to eligible Google/YouTube Music and SoundCloud subscribers, while keeping session handling on the listener's computer.
+The default is now protected 24-bit FLAC at the source sample rate. This avoids another lossy encode, adds measured attenuation only when needed, and verifies output true peaks at or below -1 dBTP. FLAC files from lossy streams are larger without restoring lost detail. Original remains an explicit option for preserving the downloaded audio unchanged, including any decoded overs. Account access can improve the source available to eligible Google/YouTube Music and SoundCloud subscribers, while keeping session handling on the listener's computer.
+
+The extractor uses `bestaudio[format_id!*=preview]/best[format_id!*=preview]`: best audio-only, falling back to a combined format when necessary, with preview formats excluded. Existing pre-version-3 Original defaults migrate to protected FLAC; later explicit Original choices persist. Other saved formats remain selected. Protected conversion refuses an unmeasurable source before integer quantization, so missing input peak data cannot silently lead to clipping.
 
 “Maximum quality” means preserving the best accessible recording and avoiding unnecessary damage. It does not mean converting a lossy stream into a genuine studio master. A source's mastering, previous compression, entitlement, and availability remain outside the app's control.
 
@@ -14,13 +16,13 @@ The release removes avoidable quality losses and misleading export behavior. Its
 | --- | --- | --- |
 | Source selection | Direct HTTP audio could outrank a better segmented stream | Best available audio across delivery methods; preview-labelled formats excluded |
 | HLS quality | First-attribute bandwidth values could be missed | Correct variant ranking prevents accidental lower-quality selection |
-| Default export | Original/source rate, with 16-bit conversion defaults | Original/source rate retained; explicit lossless conversion defaults to 24-bit; maximum lossy settings retained |
+| Default export | Original/source rate, with 16-bit conversion defaults | Protected FLAC at source rate and 24-bit; Original remains selectable; maximum lossy settings retained |
 | Bitrate controls | Compatible file extensions could trigger copying and ignore the selected bitrate | Explicit MP3/AAC/Opus exports encode to their requested target; Original is the preservation path |
 | Opus encoding | Experimental native FFmpeg encoder used to avoid a WASM crash | Dedicated libopus 1.6.1 worker, complexity 10, music tuning, VBR; proper lookahead/end trimming |
 | Other encoding | Fixed-rate Vorbis required stereo for some maximum settings | Quality-based Vorbis VBR preserves channel count; LAME uses its highest algorithm quality |
 | Lossless conversion | Bit depth selectable | 24-bit default; triangular dither when quantization requires it; FLAC compression increased for storage efficiency, without changing fidelity |
 | Quality visibility | No decoded loudness or peak measurements | On-device LUFS, loudness range, sample/true peak, duration and codec/rate reporting |
-| Peak protection | No verification of output headroom | Optional attenuation-only processing, followed by actual output measurement and bounded correction |
+| Peak protection | No verification of output headroom | Enabled by default for conversions: attenuation-only processing, followed by actual output measurement and bounded correction |
 | Replacements | An alternate upload could be obtained without updating the visible provenance | Replacement marker, actual source and match explanation retained |
 | Account access | Anonymous extraction only | Explicit local browser-session access for Google/YouTube and SoundCloud, with an in-app walkthrough |
 
@@ -67,3 +69,19 @@ Opted-in Google lookups include the YouTube Music client alongside the extractor
 The application and desktop helper must be updated together for account access and the new extraction rules. The web app detects older helper protocol versions and prompts for an update. The desktop release workflow builds Windows, Mac and Linux packages and checks their bundled runtimes without an installed Node/Python toolchain. Account functionality still requires the listener's own supported browser and login.
 
 Local validation passed TypeScript checking, 73 unit/regression checks, 19 real browser tests, native FFmpeg comparisons, and the packaged Linux helper runtime check with an empty PATH. See the commit's checks for the final release status. No claim of perfection or guaranteed premium access is made: the release provides stronger defaults, observable measurements and concrete regression checks.
+
+## Real-track measurements, 5 November 2026
+
+Current Windows validation after the protected-FLAC and browser-extension changes: production build, TypeScript, 92 unit/integration tests and 21 app browser tests passed. Native FFmpeg independently measured the default FLAC stress export at -1.2 dBTP from a +2.9 dBTP input; FFprobe confirmed 24-bit FLAC and unchanged 44.1 kHz rate. A real Chromium extension test verifies pairing, session transfer, helper restart recovery, and disconnect using a disposable profile with fixture cookies. The listener's live Premium login and actual entitled formats have not been verified. The helper now bundles an optional Chrome/Edge extension; see [browser extension setup](browser-extension.md).
+
+Five tracks from YouTube and SoundCloud, exported through the shipped WASM engine and analysed separately with native FFmpeg. A small sample, not a survey.
+
+| Check | Before | After | Note |
+| --- | --- | --- | --- |
+| Stream selection | Best listed format chosen | Unchanged | Opus ≈164 kbps of 7 YouTube formats; AAC 160 kbps of 2 SoundCloud formats, without a subscription |
+| Overs in decoded lossy audio | 3 of 5 tracks above 0 dBFS, up to +3.16 dB; protection off by default | Protection on by default: −1.2 dBTP, no flat-topped runs | Lowers level only when needed; Original stays untouched and can still contain overs |
+| 44.1→48 kHz image | −23.4 dB | −61.5 dB | 256-tap Kaiser filter; about 4.6× slower on a 2.5-minute track (2.1 s to 9.6 s in Node) |
+| 21.5 kHz passband, 44.1→48 kHz | −3.61 dB | −0.04 dB | Same filter |
+| AAC encoder flags (`aac_pns`, `aac_is`, `aac_tns`, `aac_ms`) | Null-test SNR 23.0–29.7 dB | Not adopted | At most 0.4 dB better, and disabling mid/side was worse |
+
+Open items: FFmpeg's native AAC scored lowest in null tests (23–42 dB, against 30–47 dB for MP3 at the same target). Null tests measure waveform difference, not audibility. AAC output from WebM input also sits 336 samples (7 ms) late; the cause is not established. Opus has no content above 20 kHz by design. None of this exceeds the source: a source lowpassed at 16 kHz stays lowpassed at 16 kHz.

@@ -25,7 +25,6 @@ interface ColumnState {
   query: string;
   column?: FeedColumn;
   error?: string;
-  notice?: string;
   loading: boolean;
   size: number;
 }
@@ -72,23 +71,12 @@ export default function Feed({
   const [focused, setFocused] = useState<Provider | null>(null);
   const [columns, setColumns] = useState<Record<string, ColumnState>>({});
   const [added, setAdded] = useState<string[]>([]);
-  const [adding, setAdding] = useState<string | null>(null);
+  const [adding, setAdding] = useState<string[]>([]);
   const [connection, setConnection] = useState(0);
   const requests = useRef(new Map<string, AbortController>());
   const searchInput = useRef<HTMLInputElement>(null);
   const load = useCallback((provider: Provider, term: string, size: number) => {
     requests.current.get(provider)?.abort();
-    const notice =
-      !term && provider === "SoundCloud"
-        ? "SoundCloud publishes no public chart. Search for an artist or song."
-        : undefined;
-    if (notice) {
-      setColumns((state) => ({
-        ...state,
-        [provider]: { notice, loading: false, size, query: term },
-      }));
-      return;
-    }
     const controller = new AbortController();
     requests.current.set(provider, controller);
     setColumns((state) => ({
@@ -244,7 +232,7 @@ export default function Feed({
             <article
               key={provider}
               className={`feed-card provider-${providerSlug(provider)} ${
-                state.error || state.notice ? "feed-card-short" : ""
+                state.error ? "feed-card-short" : ""
               }`}
             >
               <header>
@@ -253,13 +241,11 @@ export default function Feed({
                   <strong>{provider}</strong>
                   <small>
                     {state.column?.title ||
-                      (state.notice
-                        ? "Search available"
-                        : state.error
-                          ? "Unavailable"
-                          : search
-                            ? "Searching…"
-                            : "Loading…")}
+                      (state.error
+                        ? "Unavailable"
+                        : search
+                          ? "Searching…"
+                          : "Loading…")}
                     {rows.length ? ` · ${rows.length} tracks` : ""}
                   </small>
                 </div>
@@ -312,20 +298,7 @@ export default function Feed({
                   </button>
                 </div>
               )}
-              {state.notice && (
-                <div className="feed-message">
-                  <p>{state.notice}</p>
-                  <button
-                    onClick={() => {
-                      setFocused(provider);
-                      searchInput.current?.focus();
-                    }}
-                  >
-                    {`Search ${provider}`}
-                  </button>
-                </div>
-              )}
-              {!state.loading && !state.error && !state.notice && (
+              {!state.loading && !state.error && (
                 <ol>
                   {rows.map((row, index) => {
                     const id = `${provider}:${row.sourceUrl || `${row.artist}:${row.title}`}`;
@@ -346,17 +319,19 @@ export default function Feed({
                         <button
                           className={`feed-add ${done ? "done" : ""}`}
                           aria-label={`Add ${row.title} from ${provider}`}
-                          disabled={busy || adding !== null || done}
+                          disabled={busy || adding.includes(id) || done}
                           onClick={async () => {
-                            setAdding(id);
+                            setAdding((items) => [...items, id]);
                             const ok = await add(row, provider);
-                            setAdding(null);
+                            setAdding((items) =>
+                              items.filter((item) => item !== id),
+                            );
                             if (ok) setAdded((items) => [...items, id]);
                           }}
                         >
                           {done ? (
                             <Check size={14} />
-                          ) : adding === id ? (
+                          ) : adding.includes(id) ? (
                             <LoaderCircle size={14} className="spin" />
                           ) : (
                             <Plus size={14} />

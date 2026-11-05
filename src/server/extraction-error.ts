@@ -24,7 +24,7 @@ export function extractionFailure(
   )
     return new ExtractionError(
       "ACCOUNT_ACCESS",
-      "Could not read the selected browser session. Sign in using its default profile, close that browser, and try again. Allow the system keychain prompt, or select Firefox in Desktop helper → Connect accounts.",
+      "Could not read the selected browser session. Sign in using its default profile, close that browser, and try again. Allow the system keychain prompt, or choose Firefox under Sign in for better audio.",
       false,
       422,
     );
@@ -83,7 +83,7 @@ export function extractionFailure(
   )
     return new ExtractionError(
       "LOGIN_REQUIRED",
-      "This track requires an account. Open Desktop helper → Connect accounts, sign in to the source, and enable access.",
+      "This track requires an account. Choose Sign in for better audio under Download settings.",
       false,
       422,
     );

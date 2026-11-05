@@ -57,6 +57,7 @@ export function useLibrary() {
   const abort = useRef<AbortController | null>(null);
   const resolveAbort = useRef<AbortController | null>(null);
   const feedAbort = useRef(new Set<AbortController>());
+  const matching = useRef({ active: 0, waiting: [] as (() => void)[] });
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   current.current = tracks;
 
@@ -131,7 +132,12 @@ export function useLibrary() {
           measurement: undefined,
           qualityWarning: undefined,
           outputName: undefined,
-          status: t.file || t.mediaUrl ? "ready" : "error",
+          status:
+            t.status === "matching"
+              ? "matching"
+              : t.file || t.mediaUrl
+                ? "ready"
+                : "error",
           progress: 0,
           error: t.file || t.mediaUrl ? undefined : t.error,
         })),
@@ -165,6 +171,50 @@ export function useLibrary() {
     }
     const controller = new AbortController();
     feedAbort.current.add(controller);
+    // A chart row has names but no audio yet. It joins the list straight away
+    // and finds its audio there, so adding never waits on the search.
+    if (!entry.mediaUrl && entry.matchTicket) {
+      const id = crypto.randomUUID();
+      setTracks((items) => [
+        ...items,
+        {
+          id,
+          title: entry.title,
+          artist: entry.artist,
+          duration: entry.duration,
+          artwork: entry.artwork,
+          provider,
+          transport: entry.transport,
+          extension: "m4a",
+          selected: false,
+          status: "matching",
+          progress: 0,
+        },
+      ]);
+      setNotice(null);
+      void (async () => {
+        const slots = matching.current;
+        while (slots.active >= 4)
+          await new Promise<void>((resolve) => slots.waiting.push(resolve));
+        slots.active++;
+        try {
+          const track = await importRow(entry, provider, controller.signal);
+          patch(id, { ...track, id });
+        } catch (error) {
+          if (controller.signal.aborted)
+            setTracks((items) => items.filter((t) => t.id !== id));
+          else {
+            if (error instanceof HelperRequiredError) setHelperOpen(true);
+            patch(id, { status: "error", error: (error as Error).message });
+          }
+        } finally {
+          slots.active--;
+          slots.waiting.shift()?.();
+          feedAbort.current.delete(controller);
+        }
+      })();
+      return true;
+    }
     try {
       const track = await importRow(entry, provider, controller.signal);
       setTracks((items) => [...items, track]);

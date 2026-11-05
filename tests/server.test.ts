@@ -12,7 +12,8 @@ import { providerFor } from "../src/lib/model";
 import { CHUNK_BYTES, hlsManifest, mediaChunk } from "../src/server/media";
 import { mediaFetch, publicFetch } from "../src/server/upstream";
 import { extract } from "../src/server/extractor";
-import { searchTracks } from "../src/server/spotify-search";
+import { commandChannel, searchTracks } from "../src/server/spotify-search";
+import { discoverTrack, readDiscoverPage } from "../src/server/soundcloud";
 import { POST as resolve } from "../src/app/api/resolve/route";
 import { POST as lookup } from "../src/app/api/lookup/route";
 import { POST as feed } from "../src/app/api/feed/route";
@@ -1055,10 +1056,7 @@ describe("service feeds", () => {
       sourceUrl: "https://soundcloud.com/artist/track",
     });
   });
-  it("says which services publish no chart and which have no feed at all", async () => {
-    const soundcloud = await ask("SoundCloud");
-    expect(soundcloud.status).toBe(422);
-    expect((await soundcloud.json()).detail).toMatch(/no public chart/);
+  it("says which services have no feed at all", async () => {
     const amazon = await ask("Amazon Music", "anything");
     expect(amazon.status).toBe(400);
     expect(extract).not.toHaveBeenCalled();
@@ -1235,5 +1233,53 @@ describe("source quality selection", () => {
     expect(vi.mocked(mediaFetch).mock.calls[1][0]).toBe(
       "https://cf-media.sndcdn.com/high.m3u8",
     );
+  });
+});
+
+describe("Spotify browser commands", () => {
+  const socket = () =>
+    ({ send: vi.fn(), close: vi.fn() }) as unknown as WebSocket;
+  it("fails pending commands when the browser closes", async () => {
+    const fake = socket();
+    const pending = commandChannel(fake, 5000).send("Page.navigate");
+    fake.onclose!({} as CloseEvent);
+    await expect(pending).rejects.toThrow("closed");
+  });
+  it("fails a command the browser never answers", async () => {
+    await expect(
+      commandChannel(socket(), 5).send("Runtime.evaluate"),
+    ).rejects.toThrow("stopped responding");
+  });
+});
+describe("SoundCloud discover pages", () => {
+  const page = (tracks: unknown) =>
+    `<script>window.__sc_hydration = ${JSON.stringify([
+      { hydratable: "apiClient", data: { id: "abc" } },
+      { hydratable: "systemPlaylist", data: { title: "All Genres", tracks } },
+    ])};</script>`;
+  it("reads track IDs and the public client ID", () => {
+    expect(readDiscoverPage(page([{ id: 2 }, { id: 1 }, {}]))).toEqual({
+      title: "All Genres",
+      ids: [2, 1],
+      clientId: "abc",
+    });
+    expect(readDiscoverPage("<html></html>")).toBeUndefined();
+  });
+  it("downloads full tracks and matches preview-only ones", () => {
+    const base = {
+      id: 1,
+      title: "Song",
+      duration: 60000,
+      permalink_url: "https://soundcloud.com/a/song",
+      artwork_url: "https://i1.sndcdn.com/artworks-x-large.jpg",
+      user: { username: "A" },
+    };
+    const full = discoverTrack(base)!;
+    expect(full.mediaUrl).toContain("/api/audio?ticket=");
+    expect(full.duration).toBe(60);
+    expect(full.artwork).toContain("-t300x300.jpg");
+    const preview = discoverTrack({ ...base, policy: "SNIP" })!;
+    expect(preview.mediaUrl).toBeUndefined();
+    expect(preview.matchTicket).toBeTruthy();
   });
 });

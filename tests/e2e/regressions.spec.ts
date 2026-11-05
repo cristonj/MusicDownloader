@@ -3,6 +3,50 @@ import { open, unlink, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { demoFile } from "../fixture";
 
+test("extension setup explains installation, copies pairing details, and shows session connection", async ({ page, context }) => {
+  const token = "e".repeat(43);
+  let paired = false;
+  const directory = "C:\\Users\\Listener\\.musicdownloader\\browser-extension";
+  const code = "45821." + "a".repeat(32);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.route("**/api/helper-release", (route) => route.fulfill({ json: { windows: true } }));
+  await page.route("http://127.0.0.1:45821/**", async (route) => {
+    const request = route.request(), path = new URL(request.url()).pathname;
+    const headers = {
+      "Access-Control-Allow-Origin": request.headers().origin || "http://localhost:3000",
+      "Access-Control-Allow-Headers": "Authorization, Content-Type",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    };
+    if (request.method() === "OPTIONS") { await route.fulfill({ status: 204, headers }); return; }
+    expect(request.headers().authorization).toBe(`Bearer ${token}`);
+    let value: unknown = {};
+    if (path === "/health") value = { app: "MusicDownloader", version: 10, ready: true };
+    if (path === "/accounts") value = { accounts: paired ? { youtube: "extension" } : {} };
+    if (path === "/extension/status") value = { paired, services: paired ? { youtube: { updated: Date.now(), expires: Date.now() + 900000 } } : {} };
+    if (path === "/extension/setup") {
+      expect(request.postDataJSON()).toEqual({ browser: "edge" });
+      value = { code, directory, opened: true, expires: Date.now() + 300000 };
+    }
+    if (path === "/extension/disconnect") paired = false;
+    await route.fulfill({ json: value, headers });
+  });
+  await page.goto(`http://localhost:3000/#helper_token=${token}&helper_port=45821`);
+  await expect(page.getByText("Connected. Ready to download.")).toBeVisible();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.getByRole("button", { name: "Sign in for better audio", exact: true }).click();
+  await page.getByLabel("Extension browser").selectOption("edge");
+  await page.getByRole("button", { name: "Set up browser extension", exact: true }).click();
+  await expect(page.locator(".extension-setup")).toContainText("Load unpacked");
+  await expect(page.locator(".extension-setup")).toContainText(directory);
+  await page.getByRole("button", { name: "Copy pairing code", exact: true }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(code);
+  paired = true;
+  await expect(page.locator(".extension-setup")).toContainText("Sessions synced: YouTube Music.");
+  await page.getByRole("button", { name: "Disconnect extension", exact: true }).click();
+  await expect(page.locator(".extension-setup")).toContainText("Shared sessions removed.");
+  expect(paired).toBe(false);
+});
+
 test("large local originals exceed the former file and collection caps", async ({
   page,
 }) => {
@@ -17,6 +61,7 @@ test("large local originals exceed the former file and collection caps", async (
     }
     await page.goto("/");
     await expect(page.getByLabel("Output format")).toBeEnabled();
+    await page.getByLabel("Output format").selectOption("original");
     await page.locator("input[type=file]").setInputFiles(paths);
     await expect(page.locator(".track-row")).toHaveCount(3);
     await expect(page.locator(".notice[role=alert]")).toHaveCount(0);
@@ -152,4 +197,68 @@ test("discovery repeats searches and refreshes hidden services when revealed", a
     page.getByText("Apple Music new search", { exact: true }),
   ).toBeVisible();
   await expect(page.locator(".feed-skeletons")).toHaveCount(0);
+});
+
+test("a track's source can be compared and changed", async ({ page }, info) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "music-downloader:preferences",
+      JSON.stringify({ feed: true, feedHidden: ["YouTube", "Spotify", "Apple Music"] }),
+    ),
+  );
+  await page.route("**/api/feed", (route) =>
+    route.fulfill({
+      json: {
+        title: "Trending: All Genres",
+        tracks: [
+          {
+            title: "A song",
+            artist: "An artist",
+            mediaUrl: "/api/audio?ticket=first",
+            sourceUrl: "https://soundcloud.com/an-artist/a-song",
+            fallbackTicket: "names",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/sources", (route) =>
+    route.fulfill({
+      json: {
+        options: [
+          {
+            provider: "YouTube",
+            matchedTitle: "A song (Official Audio)",
+            matchedChannel: "An artist",
+            matchConfidence: 1,
+            mediaUrl: "/api/audio?ticket=second",
+            sourceUrl: "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+            extension: "webm",
+            codec: "opus",
+            bitrateKbps: 165,
+            sampleRate: 48000,
+          },
+          {
+            provider: "SoundCloud",
+            matchedTitle: "A song",
+            mediaUrl: "/api/audio?ticket=first",
+            sourceUrl: "https://soundcloud.com/an-artist/a-song",
+            extension: "m4a",
+            codec: "aac",
+            bitrateKbps: 160,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  await expect(page.getByText("Trending: All Genres", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Add A song from SoundCloud" }).click();
+  await page.getByRole("button", { name: "Change source for A song" }).click();
+  await expect(page.getByText("Highest bitrate here")).toBeVisible();
+  await expect(page.getByRole("button", { name: "In use" })).toHaveCount(1);
+  await page.screenshot({ path: info.outputPath("source-picker.png"), fullPage: true });
+  await page.getByRole("button", { name: "Use", exact: true }).click();
+  await expect(page.getByText("Source: YouTube", { exact: false })).toBeVisible();
+  await expect(page.getByText("Match: A song (Official Audio)", { exact: false })).toBeVisible();
 });

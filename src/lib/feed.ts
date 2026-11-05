@@ -20,6 +20,7 @@ export interface FeedRow {
   sourceUrl?: string;
   extension?: string;
   matchTicket?: string;
+  fallbackTicket?: string;
   error?: string;
 }
 export interface FeedColumn {
@@ -44,8 +45,11 @@ const row = (item: Record<string, unknown>): FeedRow => ({
   extension: typeof item.extension === "string" ? item.extension : undefined,
   matchTicket:
     typeof item.matchTicket === "string" ? item.matchTicket : undefined,
+  fallbackTicket:
+    typeof item.fallbackTicket === "string" ? item.fallbackTicket : undefined,
   error: typeof item.error === "string" ? item.error : undefined,
 });
+const FEED_TIMEOUT = 60000;
 // An empty query asks each service for its own current chart.
 export async function loadFeed(
   provider: Provider,
@@ -60,10 +64,15 @@ export async function loadFeed(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider, query, size }),
-      signal,
+      // A service that never answers ends in a message, not endless "Searching".
+      signal: AbortSignal.any([signal, AbortSignal.timeout(FEED_TIMEOUT)]),
     },
     transport,
-  );
+  ).catch((error) => {
+    if (error?.name === "TimeoutError")
+      throw new Error(`${provider} took too long to answer. Try again.`);
+    throw error;
+  });
   const result = await response.json().catch(() => null);
   if (!response.ok)
     throw new Error(
@@ -103,7 +112,7 @@ export async function importRow(
     );
     const found = await response.json().catch(() => null);
     item = response.ok
-      ? { ...item, ...found }
+      ? { ...item, ...found, error: found?.error }
       : {
           ...item,
           error: found?.detail || "No audio match was found for this track.",

@@ -1,5 +1,4 @@
 "use client";
-import Accounts from "./accounts";
 import { useEffect, useState } from "react";
 import { Check, Download, LoaderCircle, X } from "lucide-react";
 import {
@@ -13,7 +12,13 @@ import {
   isLocalApp,
 } from "@/lib/helper";
 
-export default function HelperSetup({ onClose }: { onClose: () => void }) {
+export default function HelperSetup({
+  onClose,
+  openSignIn,
+}: {
+  onClose: () => void;
+  openSignIn: () => void;
+}) {
   const [platform, setPlatform] = useState<"windows" | "mac" | "linux">(
     "windows",
   );
@@ -259,7 +264,11 @@ export default function HelperSetup({ onClose }: { onClose: () => void }) {
               : "Add to Start menu"}
           </button>
         )}
-        {ready && <Accounts />}
+        {ready && (
+          <button className="secondary-button full-width" onClick={openSignIn}>
+            Sign in for better audio
+          </button>
+        )}
         <button
           className="text-button"
           onClick={async () => {

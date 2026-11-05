@@ -95,7 +95,7 @@ const READ_ROWS = `(() => {
     page: rows.length ? "" : document.body?.innerText.slice(0, 1000) || "",
   });
 })()`;
-const PAGE_TIMEOUT = 20000;
+const PAGE_TIMEOUT = 15000;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function debuggerPort(profile: string, deadline: number) {
   while (Date.now() < deadline) {
@@ -107,31 +107,71 @@ async function debuggerPort(profile: string, deadline: number) {
   }
   throw new Error("The browser did not start.");
 }
+const COMMAND_TIMEOUT = 8000;
+type Commands = {
+  send: (method: string, params?: object) => Promise<Record<string, any>>;
+  close: () => void;
+};
+// Every command settles: a browser that stops answering or closes must fail the
+// search, since a pending command would hold up every search queued behind it.
+export function commandChannel(
+  socket: Pick<WebSocket, "send" | "close" | "onmessage" | "onclose">,
+  timeout = COMMAND_TIMEOUT,
+): Commands {
+  const pending = new Map<
+    number,
+    {
+      done: (value: Record<string, any>) => void;
+      fail: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  let next = 0,
+    closed = false;
+  const settle = (id: number) => {
+    const command = pending.get(id);
+    if (command) clearTimeout(command.timer);
+    pending.delete(id);
+    return command;
+  };
+  socket.onmessage = (event) => {
+    const message = JSON.parse(String(event.data));
+    if (message.id) settle(message.id)?.done(message.result || {});
+  };
+  socket.onclose = () => {
+    closed = true;
+    for (const id of [...pending.keys()])
+      settle(id)?.fail(new Error("The browser closed."));
+  };
+  return {
+    send: (method, params = {}) =>
+      new Promise((done, fail) => {
+        if (closed) return fail(new Error("The browser closed."));
+        const id = ++next;
+        const timer = setTimeout(() => {
+          settle(id)?.fail(new Error("The browser stopped responding."));
+        }, timeout);
+        pending.set(id, { done, fail, timer });
+        socket.send(JSON.stringify({ id, method, params }));
+      }),
+    close: () => socket.close(),
+  };
+}
 function connect(url: string) {
-  return new Promise<{
-    send: (method: string, params?: object) => Promise<Record<string, any>>;
-    close: () => void;
-  }>((resolve, reject) => {
+  return new Promise<Commands>((resolve, reject) => {
     const socket = new WebSocket(url);
-    const pending = new Map<number, (value: Record<string, any>) => void>();
-    let next = 0;
-    socket.onerror = () => reject(new Error("The browser refused the page."));
-    socket.onmessage = (event) => {
-      const message = JSON.parse(String(event.data));
-      if (message.id) {
-        pending.get(message.id)?.(message.result || {});
-        pending.delete(message.id);
-      }
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error("The browser refused the page."));
+    }, COMMAND_TIMEOUT);
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("The browser refused the page."));
     };
-    socket.onopen = () =>
-      resolve({
-        send: (method, params = {}) =>
-          new Promise((done) => {
-            pending.set(++next, done);
-            socket.send(JSON.stringify({ id: next, method, params }));
-          }),
-        close: () => socket.close(),
-      });
+    socket.onopen = () => {
+      clearTimeout(timer);
+      resolve(commandChannel(socket));
+    };
   });
 }
 async function readSearchPage(
@@ -156,13 +196,18 @@ async function readSearchPage(
     ],
     { stdio: "ignore", windowsHide: true },
   );
+  // A browser that cannot start reports it through the port wait below.
+  browser.on("error", () => {});
   const stop = () => browser.kill();
+  if (signal?.aborted) stop();
   signal?.addEventListener("abort", stop, { once: true });
   try {
     const deadline = Date.now() + PAGE_TIMEOUT;
     const port = await debuggerPort(profile, deadline);
     const targets = await (
-      await fetch(`http://127.0.0.1:${port}/json/list`)
+      await fetch(`http://127.0.0.1:${port}/json/list`, {
+        signal: AbortSignal.timeout(5000),
+      })
     ).json();
     const target = targets.find(
       (item: { type: string }) => item.type === "page",
@@ -196,7 +241,8 @@ async function readSearchPage(
   } finally {
     signal?.removeEventListener("abort", stop);
     browser.kill();
-    await rm(profile, {
+    // Windows holds the profile briefly after exit; results need not wait.
+    void rm(profile, {
       recursive: true,
       force: true,
       maxRetries: 8,
@@ -204,8 +250,21 @@ async function readSearchPage(
     }).catch(() => {});
   }
 }
-// One page at a time keeps a burst of searches from opening many browsers.
-let turn: Promise<unknown> = Promise.resolve();
+// Searches run side by side; the cap only stops a burst opening many browsers.
+const MAX_BROWSERS = 3;
+let open = 0;
+const waiting: (() => void)[] = [];
+async function withBrowserSlot<T>(run: () => Promise<T>): Promise<T> {
+  while (open >= MAX_BROWSERS)
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  open++;
+  try {
+    return await run();
+  } finally {
+    open--;
+    waiting.shift()?.();
+  }
+}
 export async function spotifySearch(
   query: string,
   limit: number,
@@ -217,12 +276,22 @@ export async function spotifySearch(
       422,
       "Spotify search runs in Edge or Chrome on your computer. Open the desktop helper, or install one of those browsers, and search again.",
     );
-  const reading = turn.then(() => readSearchPage(path, query, limit, signal));
-  turn = reading.catch(() => {});
+  const reading = withBrowserSlot(async () => {
+    if (signal?.aborted) throw new Error("Cancelled");
+    // The budget also ends a read whose browser never answers.
+    const budget = AbortSignal.timeout(PAGE_TIMEOUT + 3000);
+    return readSearchPage(
+      path,
+      query,
+      limit,
+      signal ? AbortSignal.any([signal, budget]) : budget,
+    );
+  });
   const { rows, text } = await reading.catch(() => {
     if (signal?.aborted) throw new HttpError(499, "Search cancelled.");
     throw new HttpError(502, "Spotify's search page could not be opened.");
   });
+  if (signal?.aborted) throw new HttpError(499, "Search cancelled.");
   if (rows.length) return searchTracks(rows, limit);
   if (/no results found/i.test(text)) return [];
   // A challenge is left for the listener. It is never answered or worked around.

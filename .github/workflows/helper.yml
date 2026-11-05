@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "helper/**"
+      - "browser-extension/**"
       - "src/**"
       - "public/**"
       - "next.config.ts"
@@ -87,6 +88,7 @@ jobs:
             The app runs on your computer at 127.0.0.1. Spotify search uses your installed Edge or Chrome.
             Python and Node are included; neither needs to be installed.
             Keep the helper running while using MusicDownloader. Quit it from the app's helper setup.
+            For signed-in YouTube Music or SoundCloud sessions, choose Sign in for better audio and Set up browser extension. The helper prepares the Chrome/Edge extension and guides you through installation and pairing.
             These builds are unsigned and your operating system may ask you to allow them.
             Mac: unzip, then open MusicDownloader Helper.app. Supports Apple Silicon and Intel.
             Source and third-party notices: https://github.com/cristonj/MusicDownloader
