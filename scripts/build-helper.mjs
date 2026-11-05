@@ -16,6 +16,7 @@ await cp(
   `.helper-build/assets/${process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"}`,
 );
 await cp(".server/version.json", ".helper-build/assets/version.json");
+await cp("browser-extension", ".helper-build/assets/extension", { recursive: true });
 // The helper serves the built page itself, so nothing depends on a hosted server.
 execFileSync(process.execPath, ["scripts/copy-ffmpeg.mjs"], {
   stdio: "inherit",

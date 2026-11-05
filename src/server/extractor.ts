@@ -20,6 +20,7 @@ export interface Extracted {
   protocol?: string;
   acodec?: string;
   abr?: number;
+  tbr?: number;
   asr?: number;
   audio_channels?: number;
   bits_per_raw_sample?: number;

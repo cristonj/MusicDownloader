@@ -1,6 +1,6 @@
 export const HELPER_PORT = 45821;
 // Bump with helper/server.ts when the helper needs a fix the app relies on.
-export const HELPER_VERSION = 7;
+export const HELPER_VERSION = 10;
 export const helperOutdated = (health: { version?: unknown }) =>
   typeof health.version !== "number" || health.version < HELPER_VERSION;
 const KEY = "music-downloader:helper";
@@ -48,7 +48,7 @@ export async function helperFetch(
   if (!connection)
     throw new HelperRequiredError("Open the desktop helper to connect.");
   if (
-    !/^\/(?:api\/(?:resolve|match|lookup|feed|audio|media)(?:\?|$)|health$|accounts$|install$|quit$)/.test(
+    !/^\/(?:api\/(?:resolve|match|lookup|feed|sources|audio|media)(?:\?|$)|health$|accounts(?:\/check)?$|extension\/(?:setup|status|disconnect)$|install$|quit$)/.test(
       path,
     )
   )

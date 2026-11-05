@@ -6,13 +6,13 @@ import {
 } from "../src/lib/quality";
 import { conversionArgs, defaults } from "../src/lib/model";
 describe("quality decisions and meters", () => {
-  it("preserves source by default and uses maximum encoder settings", () => {
+  it("defaults to protected lossless at the source rate and uses maximum encoder settings", () => {
     expect(defaults).toMatchObject({
-      format: "original",
+      format: "flac",
       sampleRate: "source",
       bitrate: "320",
       bitDepth: "24",
-      preventClipping: false,
+      preventClipping: true,
     });
     expect(conversionArgs({ ...defaults, format: "mp3" })).toContain("320k");
     expect(() =>

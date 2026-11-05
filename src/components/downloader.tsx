@@ -19,6 +19,7 @@ import {
   Pause,
   Play,
   Settings2,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -35,6 +36,8 @@ import { fetchAudio } from "@/lib/sources";
 import AudioDetails from "./audio-details";
 import Feed from "./feed";
 import HelperSetup from "./helper-setup";
+import SourcePicker from "./source-picker";
+import BetterAudio, { readAccounts, type Accounts } from "./better-audio";
 import { useLibrary } from "./use-library";
 
 function Brand({ compact = false }: { compact?: boolean }) {
@@ -119,6 +122,7 @@ function ServiceGlyph({
     );
   if (provider === "Amazon Music")
     return (
+      // The Amazon smile with its arrowhead, under a music wordmark.
       <svg
         width={size}
         height={size}
@@ -126,11 +130,28 @@ function ServiceGlyph({
         fill="none"
         aria-hidden="true"
       >
-        <circle cx="12" cy="12" r="11" fill="currentColor" />
+        <rect width="24" height="24" rx="5" fill="currentColor" />
+        <text
+          x="12"
+          y="12.5"
+          textAnchor="middle"
+          fontSize="8.2"
+          fontWeight="700"
+          fontFamily="Arial, sans-serif"
+          fill="var(--surface)"
+        >
+          music
+        </text>
         <path
-          d="M9 15.5V8l5.5 1.4v5.3M9 15.5a1.6 1.6 0 1 1-1.6-1.6c.6 0 1.2.3 1.6.8m5.5-1.3a1.6 1.6 0 1 1-1.6-1.6c.7 0 1.3.3 1.6.8"
+          d="M4.5 15.2c4.4 3.2 10.4 3.2 14.6.3"
           stroke="var(--surface)"
           strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+        <path
+          d="M16.6 14.9l3-.3-.6 2.9"
+          stroke="var(--surface)"
+          strokeWidth="1.3"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -188,6 +209,18 @@ export default function Downloader() {
   // Fetched previews are kept so replaying a track doesn't download it again.
   const previews = useRef(new Map<string, Blob>());
   const [helpOpen, setHelpOpen] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
+  const [accounts, setAccounts] = useState<Accounts>({});
+  useEffect(() => {
+    if (signInOpen) return;
+    readAccounts()
+      .then(setAccounts)
+      .catch(() => {});
+  }, [signInOpen, library.helperOpen]);
+  const linkedServices = [
+    accounts.youtube && "YouTube Music",
+    accounts.soundcloud && "SoundCloud",
+  ].filter(Boolean);
   const files = useRef<HTMLInputElement>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const audioUrl = useRef<string | null>(null);
@@ -259,12 +292,14 @@ export default function Downloader() {
     if (playingId && !tracks.some((t) => t.id === playingId)) stopAudio();
   }, [tracks, playingId]);
   useEffect(() => {
-    if (!library.settingsOpen && !helpOpen && !library.helperOpen) return;
+    if (!library.settingsOpen && !helpOpen && !library.helperOpen && !signInOpen)
+      return;
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         library.setSettingsOpen(false);
         library.setHelperOpen(false);
         setHelpOpen(false);
+        setSignInOpen(false);
       }
       if (event.key === "Tab") {
         const dialog = document.querySelector('[role="dialog"]');
@@ -299,15 +334,17 @@ export default function Downloader() {
       if (previous?.matches("button, a[href], [tabindex]"))
         previous.focus({ preventScroll: true });
     };
-  }, [library.settingsOpen, helpOpen, library.helperOpen]);
+  }, [library.settingsOpen, helpOpen, library.helperOpen, signInOpen]);
 
+  // Changing a track's source changes what its preview should play.
+  const previewKey = (track: Track) => `${track.id}:${track.mediaUrl}`;
   const preview = async (track: Track) => {
     if (playingId === track.id || loadingId === track.id) {
       stopAudio();
       return;
     }
     stopAudio();
-    let blob = track.output || track.file || previews.current.get(track.id);
+    let blob = track.output || track.file || previews.current.get(previewKey(track));
     // Service tracks stream through signed manifests the audio element can't
     // play directly, so fetch the audio on this device first.
     if (!blob && track.mediaUrl?.startsWith("/api/audio?ticket=")) {
@@ -328,7 +365,7 @@ export default function Downloader() {
       if (controller.signal.aborted) return;
       previewLoad.current = null;
       setLoadingId(null);
-      previews.current.set(track.id, blob);
+      previews.current.set(previewKey(track), blob);
       while (previews.current.size > 5)
         previews.current.delete(previews.current.keys().next().value!);
     }
@@ -512,6 +549,152 @@ export default function Downloader() {
             />
           </section>
 
+          <section
+            className="settings-panel"
+            id="download-settings"
+            aria-label="Export settings"
+          >
+            <div className="settings-panel-head">
+              <h2>Download settings</h2>
+              <p>Best available source audio, then your chosen export.</p>
+            </div>
+            <div className="settings-panel-fields">
+              <label className="panel-field">
+                <span>File type</span>
+                <span className="panel-select">
+                  <select
+                    aria-label="Output format"
+                    value={prefs.format}
+                    onChange={(event) =>
+                      library.changePrefs({
+                        format: event.target.value as typeof prefs.format,
+                      })
+                    }
+                    disabled={locked}
+                  >
+                    {formats.map((format) => (
+                      <option value={format.value} key={format.value}>
+                        {format.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} />
+                </span>
+                <small>
+                  {formats.find((f) => f.value === prefs.format)?.note}
+                </small>
+              </label>
+              <label className="panel-field">
+                <span>Quality</span>
+                {prefs.format === "original" ? (
+                  <strong className="panel-fixed">Best the source offers</strong>
+                ) : (
+                  <span className="panel-select">
+                    {isLossless(prefs.format) ? (
+                      <select
+                        aria-label="Bit depth"
+                        value={prefs.bitDepth}
+                        onChange={(event) =>
+                          library.changePrefs({
+                            bitDepth: event.target
+                              .value as typeof prefs.bitDepth,
+                          })
+                        }
+                        disabled={locked}
+                      >
+                        <option value="16">16-bit</option>
+                        <option value="24">24-bit</option>
+                      </select>
+                    ) : (
+                      <select
+                        aria-label="Audio bitrate"
+                        value={prefs.bitrate}
+                        onChange={(event) =>
+                          library.changePrefs({
+                            bitrate: event.target
+                              .value as typeof prefs.bitrate,
+                          })
+                        }
+                        disabled={locked}
+                      >
+                        {["128", "192", "256", "320"].map((value) => (
+                          <option key={value} value={value}>
+                            {prefs.format === "ogg"
+                              ? {
+                                  "128": "Standard VBR",
+                                  "192": "High VBR",
+                                  "256": "Higher VBR",
+                                  "320": "Maximum VBR",
+                                }[value as "128" | "192" | "256" | "320"]
+                              : `${value} kbps`}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <ChevronDown size={15} />
+                  </span>
+                )}
+                <small>
+                  {prefs.format === "original"
+                    ? "Keeps the audio exactly as downloaded."
+                    : "Can't add detail the source doesn't have."}
+                </small>
+              </label>
+              <div className="panel-field">
+                <span>Source</span>
+                <strong className="panel-fixed">Best available audio</strong>
+                <small>
+                  {tracks.length
+                    ? "Use “Change source” on any track below."
+                    : "Add a track to compare its sources."}
+                </small>
+              </div>
+            </div>
+            <div className="sign-in-bar">
+              <div>
+                <strong>Protected lossless export</strong>
+                <span>
+                  24-bit FLAC at the source rate, with measured peak protection.
+                  Larger files; prevents new clipping without another lossy encode.
+                  Existing recording distortion remains.
+                </span>
+              </div>
+              <button
+                className="secondary-button"
+                disabled={locked}
+                onClick={() => library.changePrefs({
+                  format: "flac", bitDepth: "24", sampleRate: "source",
+                  preventClipping: true,
+                })}
+              >
+                Use protected FLAC
+              </button>
+            </div>
+            <div className="sign-in-bar">
+              <Sparkles size={18} />
+              <div>
+                <strong>
+                  {linkedServices.length
+                    ? `Signed in to ${linkedServices.join(" and ")}`
+                    : "Pay for YouTube Music or SoundCloud?"}
+                </strong>
+                <span>
+                  {linkedServices.length
+                    ? "Downloads use the audio your account can access."
+                    : "Sign in to download the higher quality your plan includes."}
+                </span>
+              </div>
+              <button
+                className="primary-button"
+                onClick={() => setSignInOpen(true)}
+              >
+                {linkedServices.length
+                  ? "Manage sign-in"
+                  : "Sign in for better audio"}
+              </button>
+            </div>
+          </section>
+
           {prefs.feed && library.hydrated && (
             <Feed
               add={library.addFeedRow}
@@ -521,84 +704,6 @@ export default function Downloader() {
               setHidden={(feedHidden) => library.changePrefs({ feedHidden })}
             />
           )}
-
-          <section className="format-bar" aria-label="Export settings">
-            <div className="format-controls">
-              <label className="select-wrap">
-                <span>Format</span>
-                <select
-                  aria-label="Output format"
-                  value={prefs.format}
-                  onChange={(event) =>
-                    library.changePrefs({
-                      format: event.target.value as typeof prefs.format,
-                    })
-                  }
-                  disabled={locked}
-                >
-                  {formats.map((format) => (
-                    <option value={format.value} key={format.value}>
-                      {format.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={13} />
-              </label>
-              <span className="control-divider" />
-              <label className="select-wrap quality-select">
-                <span>Quality</span>
-                {prefs.format === "original" ? (
-                  <strong>Source quality</strong>
-                ) : isLossless(prefs.format) ? (
-                  <select
-                    aria-label="Bit depth"
-                    value={prefs.bitDepth}
-                    onChange={(event) =>
-                      library.changePrefs({
-                        bitDepth: event.target.value as typeof prefs.bitDepth,
-                      })
-                    }
-                    disabled={locked}
-                  >
-                    <option value="16">16-bit</option>
-                    <option value="24">24-bit</option>
-                  </select>
-                ) : (
-                  <select
-                    aria-label="Audio bitrate"
-                    value={prefs.bitrate}
-                    onChange={(event) =>
-                      library.changePrefs({
-                        bitrate: event.target.value as typeof prefs.bitrate,
-                      })
-                    }
-                    disabled={locked}
-                  >
-                    {["128", "192", "256", "320"].map((value) => (
-                      <option key={value} value={value}>
-                        {prefs.format === "ogg"
-                          ? {
-                              "128": "Standard VBR",
-                              "192": "High VBR",
-                              "256": "Higher VBR",
-                              "320": "Maximum VBR",
-                            }[value as "128" | "192" | "256" | "320"]
-                          : `${value} kbps`}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {prefs.format !== "original" && <ChevronDown size={13} />}
-              </label>
-              <button
-                className="icon-button advanced-settings"
-                aria-label="Advanced audio settings"
-                onClick={() => library.setSettingsOpen(true)}
-              >
-                <Settings2 size={17} />
-              </button>
-            </div>
-          </section>
 
           {notice && (
             <div
@@ -776,6 +881,13 @@ export default function Downloader() {
                             </a>
                           )
                         )}
+                        <SourcePicker
+                          track={track}
+                          disabled={locked}
+                          update={(value) =>
+                            library.updateTrack(track.id, value)
+                          }
+                        />
                         <AudioDetails
                           track={track}
                           disabled={locked}
@@ -800,6 +912,11 @@ export default function Downloader() {
                         {track.status === "done" ? (
                           <span className="done-label">
                             <Check size={12} /> Ready
+                          </span>
+                        ) : track.status === "matching" ? (
+                          <span className="matching-label">
+                            <LoaderCircle size={13} className="spin" /> Finding
+                            audio
                           </span>
                         ) : ["fetching", "converting"].includes(
                             track.status,
@@ -840,7 +957,8 @@ export default function Downloader() {
                         {selected.length === 1 ? "" : "s"}
                       </strong>
                       <span>
-                        {formatLabel} <i>·</i> {formatQuality}
+                        {formatLabel} <i>·</i> {formatQuality} <i>·</i>{" "}
+                        <a href="#download-settings">Change</a>
                       </span>
                     </div>
                   </div>
@@ -937,7 +1055,22 @@ export default function Downloader() {
         </div>
       )}
       {library.helperOpen && (
-        <HelperSetup onClose={() => library.setHelperOpen(false)} />
+        <HelperSetup
+          onClose={() => library.setHelperOpen(false)}
+          openSignIn={() => {
+            library.setHelperOpen(false);
+            setSignInOpen(true);
+          }}
+        />
+      )}
+      {signInOpen && (
+        <BetterAudio
+          onClose={() => setSignInOpen(false)}
+          openHelper={() => {
+            setSignInOpen(false);
+            library.setHelperOpen(true);
+          }}
+        />
       )}
       {(library.settingsOpen || helpOpen) && (
         <div
@@ -986,9 +1119,11 @@ export default function Downloader() {
                   <div>
                     <span>02</span>
                     <section>
-                      <strong>Choose your format</strong>
+                      <strong>Choose file type, quality, and source</strong>
                       <p>
-                        Original is fastest. MP3, AAC, FLAC, WAV, OGG, Opus, and
+                        File type and quality are under Download settings; each
+                        track has its own Change source button. Original is
+                        fastest. MP3, AAC, FLAC, WAV, OGG, Opus, and
                         AIFF convert on your device. A higher setting cannot
                         restore detail missing from the source.
                       </p>
@@ -1055,10 +1190,10 @@ export default function Downloader() {
                     </button>
                   </div>
                   <p className="settings-note">
-                    YouTube, Spotify, and Apple Music publish a chart anyone can
-                    read; YouTube, Apple Music, and SoundCloud also publish a
-                    search, and Spotify's opens in Edge or Chrome on your
-                    computer through the helper. Amazon Music and Bandcamp publish
+                    YouTube, Spotify, Apple Music, and SoundCloud each publish a
+                    chart anyone can read. Spotify's search opens in Edge or
+                    Chrome on your computer; if it can't, Deezer's public catalog
+                    stands in and the column says so. Amazon Music and Bandcamp publish
                     neither without an account, so they have no column.
                   </p>
                 </div>

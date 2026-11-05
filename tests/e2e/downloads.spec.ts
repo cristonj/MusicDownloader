@@ -103,6 +103,7 @@ test("Spotify matches are shown and unmatched entries are retained", async ({
       "music-downloader:preferences",
       JSON.stringify({
         format: "original",
+        prefsVersion: 3,
       }),
     ),
   );
@@ -363,6 +364,7 @@ test("source failure keeps successful ZIP tracks and the true original extension
       "music-downloader:preferences",
       JSON.stringify({
         format: "original",
+        prefsVersion: 3,
       }),
     ),
   );
@@ -472,6 +474,7 @@ test("large service downloads use parallel bounded chunks with no setup", async 
     active--;
   });
   await page.goto("/");
+  await page.getByLabel("Output format").selectOption("original");
   await page
     .getByLabel("Music or playlist link")
     .fill("https://artist.bandcamp.com/track/example");
@@ -531,6 +534,7 @@ test("Original HLS audio is assembled and remuxed locally without transcoding", 
     }),
   );
   await page.goto("/");
+  await page.getByLabel("Output format").selectOption("original");
   await page
     .getByLabel("Music or playlist link")
     .fill("https://soundcloud.com/artist/track");
@@ -598,7 +602,7 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     const request = route.request(),
       path = new URL(request.url()).pathname;
     const headers = {
-      "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
+      "Access-Control-Allow-Origin": request.headers().origin || "http://localhost:3000",
       "Access-Control-Allow-Headers": "Authorization, Content-Type, Range",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Expose-Headers": "Content-Range, X-Audio-More",
@@ -610,7 +614,7 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     expect(request.headers().authorization).toBe(`Bearer ${token}`);
     if (path === "/health")
       await route.fulfill({
-        json: { app: "MusicDownloader", version: 6, ready: true },
+        json: { app: "MusicDownloader", version: 10, ready: true },
         headers,
       });
     else if (path === "/accounts") {
@@ -622,6 +626,8 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
         },
         headers,
       });
+    } else if (path === "/accounts/check") {
+      await route.fulfill({ json: { signedIn: true }, headers });
     } else if (path === "/api/feed") {
       localFeedRequests++;
       const { provider } = request.postDataJSON();
@@ -668,7 +674,10 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
     hostedSourceRequests++;
     return route.abort();
   });
-  await page.goto(`/#helper_token=${token}&helper_port=45821`);
+  // The helper's own copy of the app runs on 127.0.0.1 and skips this wizard.
+  await page.goto(
+    `http://localhost:3000/#helper_token=${token}&helper_port=45821`,
+  );
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByText("Connected. Ready to download.")).toBeVisible();
   await expect(page).not.toHaveURL(/helper_token/);
@@ -676,22 +685,18 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
   await expect(
     page.getByRole("link", { name: "Download helper" }),
   ).toHaveAttribute("href", /MusicDownloader-Helper-Windows\.exe$/);
+  await page.getByRole("button", { name: "Done", exact: true }).click();
   await page
-    .getByText("Connect accounts for better sources", { exact: true })
+    .getByRole("button", { name: "Sign in for better audio", exact: true })
     .click();
   await page.getByLabel("Account browser").selectOption("firefox");
-  const google = page.locator(".account-row").first();
-  await expect(google.getByRole("link")).toHaveAttribute(
-    "href",
-    "https://music.youtube.com/",
-  );
-  await google
-    .getByRole("button", { name: "Use this account", exact: true })
-    .click();
   await expect(
-    google.getByRole("button", { name: "Disconnect firefox", exact: true }),
-  ).toBeVisible();
+    page.getByRole("link", { name: /Sign in/ }).first(),
+  ).toHaveAttribute("href", "https://music.youtube.com/");
+  await page.getByRole("button", { name: "Connect YouTube Music" }).click();
+  await expect(page.getByText("Connected and signed in.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.getByLabel("Output format").selectOption("original");
   await page
     .getByLabel("Music or playlist link")
     .fill("https://music.youtube.com/watch?v=xKJtIjB3pAI");
@@ -713,10 +718,10 @@ test("desktop helper wizard pairs and downloads without using the hosted source 
   await expect(
     page.getByText("YouTube local discovery", { exact: true }),
   ).toBeVisible();
-  expect(localFeedRequests).toBe(3);
+  expect(localFeedRequests).toBe(4);
 });
 
-test("audio meters agree with native FFmpeg and optional protection limits true peaks", async ({
+test("default protected FLAC agrees with native FFmpeg and limits true peaks", async ({
   page,
 }) => {
   const { mkdtemp, rm } = await import("node:fs/promises");
@@ -772,17 +777,24 @@ test("audio meters agree with native FFmpeg and optional protection limits true 
     await expect(page.locator(".audio-details")).toContainText(
       `${lufs.toFixed(1)} LUFS`,
     );
-    await page.getByLabel("Output format").selectOption("wav");
+    await expect(page.getByLabel("Output format")).toHaveValue("flac");
     await page
       .getByRole("button", { name: "Preferences", exact: true })
       .click();
-    await page.getByLabel("Protect conversion peaks").check();
+    await expect(page.getByLabel("Protect conversion peaks")).toBeChecked();
     await page.getByRole("button", { name: "Done", exact: true }).click();
     const waiting = page.waitForEvent("download");
     await page
       .getByRole("button", { name: "Download track", exact: true })
       .click();
     const download = await waiting;
+    expect(download.suggestedFilename()).toBe("Hot.flac");
+    const stream = JSON.parse(execFileSync("ffprobe", [
+      "-v", "error", "-show_streams", "-of", "json", (await download.path())!,
+    ], { encoding: "utf8" })).streams[0];
+    expect(stream.codec_name).toBe("flac");
+    expect(Number(stream.bits_per_raw_sample)).toBe(24);
+    expect(Number(stream.sample_rate)).toBe(44100);
     const outputReport = spawnSync(
       "ffmpeg",
       [

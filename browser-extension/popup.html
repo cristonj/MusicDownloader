@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>MusicDownloader connection</title><link rel="stylesheet" href="popup.css"></head>
+<body>
+  <h1>Connect your music browser</h1>
+  <p>Keep the desktop helper open. Sessions go only to the helper on this computer.</p>
+  <form id="pair-form">
+    <label for="code">Pairing code from MusicDownloader</label>
+    <input id="code" autocomplete="off" spellcheck="false" placeholder="45821.…" required>
+    <button type="submit">Pair with helper</button>
+  </form>
+  <section aria-label="Services">
+    <h2>Sign in here, then connect</h2>
+    <p>Use your usual account in this browser. Approve access only to the service you choose.</p>
+    <div class="service"><a href="https://music.youtube.com/" target="_blank" rel="noreferrer">Open YouTube Music ↗</a><button id="youtube">Connect YouTube Music</button></div>
+    <div class="service"><a href="https://soundcloud.com/signin" target="_blank" rel="noreferrer">Open SoundCloud ↗</a><button id="soundcloud">Connect SoundCloud</button></div>
+  </section>
+  <p id="status" role="status" aria-live="polite">Checking connection…</p>
+  <div class="actions"><button id="sync">Sync sessions</button><button id="disconnect" class="quiet">Disconnect</button></div>
+  <p class="note">Refreshes every 2 minutes while the browser and helper are open. Re-import existing tracks to use the connected account. A subscription can expose better streams on supported tracks; it does not guarantee lossless audio.</p>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

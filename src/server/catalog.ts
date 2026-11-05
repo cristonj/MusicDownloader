@@ -9,6 +9,7 @@ import { amazonMusicMetadata } from "./amazon";
 import { allowedSource, HttpError, signTicket } from "./security";
 import { extract, type Extracted } from "./extractor";
 import { spotifyMetadata } from "./spotify";
+import { discoverSet, isDiscoverSet } from "./soundcloud";
 export interface CatalogTrack {
   title: string;
   // The upload's own title, when a shorter song name is shown instead.
@@ -242,6 +243,9 @@ export async function resolveCatalog(value: string, signal?: AbortSignal) {
       })),
     };
   }
+  // Discover sets have no set page yt-dlp can extract.
+  if (provider === "SoundCloud" && isDiscoverSet(url))
+    return discoverSet(url.href, MAX_TRACKS, signal);
   const info = await extract(url.href, true, signal);
   if (!info.entries)
     return {
@@ -357,10 +361,10 @@ export async function matchTrack(
 }
 // Song listings name only the title, so the closest few are read in full for
 // their channel, length, and audio formats.
-async function musicCandidates(
+async function musicListing(
   track: { title: string; artist: string },
   signal?: AbortSignal,
-): Promise<Extracted[]> {
+) {
   const search = `${track.artist} ${track.title}`.trim();
   const found = await extract(
     `https://music.youtube.com/search?q=${encodeURIComponent(search)}#songs`,
@@ -368,7 +372,7 @@ async function musicCandidates(
     signal,
   );
   const target = words(track.title);
-  const closest = (found.entries || [])
+  return (found.entries || [])
     .filter((x) => {
       const title = words(x.title || "");
       return (
@@ -378,6 +382,12 @@ async function musicCandidates(
       );
     })
     .slice(0, 3);
+}
+async function musicCandidates(
+  track: { title: string; artist: string },
+  signal?: AbortSignal,
+): Promise<Extracted[]> {
+  const closest = await musicListing(track, signal);
   const full = await Promise.allSettled(
     closest.map((x) =>
       extract(`https://www.youtube.com/watch?v=${x.id}`, false, signal),
@@ -385,18 +395,20 @@ async function musicCandidates(
   );
   return full.flatMap((x) => (x.status === "fulfilled" ? [x.value] : []));
 }
-async function matchQuery(
-  track: { title: string; artist: string; duration?: number },
-  query: string,
-  origin: string,
-  exclude: string[],
-  signal?: AbortSignal,
-): Promise<CatalogTrack | undefined> {
-  const youtube = !query.startsWith("scsearch");
-  const entries =
-    query === MUSIC_SEARCH
-      ? await musicCandidates(track, signal)
-      : (await extract(query, true, signal)).entries;
+type MatchTarget = { title: string; artist: string; duration?: number };
+const lengthMatches = (track: MatchTarget, x: Extracted) =>
+  Boolean(
+    track.duration &&
+    x.duration &&
+    Math.abs(track.duration - x.duration) <= Math.max(3, track.duration * 0.03),
+  );
+// Scores uploads as candidates for one recording, most likely first.
+function rankUploads(
+  track: MatchTarget,
+  entries: Extracted[],
+  youtube: boolean,
+  exclude: string[] = [],
+) {
   const link = (x: Extracted) =>
     youtube
       ? /^[a-zA-Z0-9_-]{11}$/.test(x.id || "")
@@ -430,14 +442,7 @@ async function matchQuery(
       return "the artist’s channel";
     return "";
   };
-  const lengthMatches = (x: Extracted) =>
-    Boolean(
-      track.duration &&
-      x.duration &&
-      Math.abs(track.duration - x.duration) <=
-        Math.max(3, track.duration * 0.03),
-    );
-  const scored = (entries || [])
+  return entries
     .filter(
       (x) =>
         !x.is_live &&
@@ -449,7 +454,7 @@ async function matchQuery(
     .map((x) => {
       let score = matchScore(track.title, track.artist, track.duration, x);
       if (official(x)) score += 0.1;
-      if (lengthMatches(x)) score += 0.1;
+      if (lengthMatches(track, x)) score += 0.1;
       else if (track.duration && x.duration) score -= 0.25;
       // Fan lyric videos and visualizers may re-edit or overlay the audio.
       if (
@@ -458,23 +463,27 @@ async function matchQuery(
       )
         score -= 0.1;
       // Rank unclamped so official uploads win ties at the top.
-      return { x, score };
+      return { x, score, link: link(x)!, source: official(x) };
     })
     // Equally likely recordings are separated by the audio they offer.
     .sort((a, b) => b.score - a.score || (b.x.abr || 0) - (a.x.abr || 0));
-  const best = scored[0];
-  if (!best || best.score < 0.58) return undefined;
+}
+function describeMatch(
+  track: MatchTarget,
+  best: ReturnType<typeof rankUploads>[number],
+  youtube: boolean,
+  origin: string,
+): CatalogTrack {
   const channel = best.x.channel || best.x.uploader || "";
-  const source = official(best.x);
   // A fan upload can be the right song but cannot be verified as the exact
   // release, so it is never reported as a certain match.
-  const confidence = Math.min(source ? 1 : 0.75, best.score);
+  const confidence = Math.min(best.source ? 1 : 0.75, best.score);
   const reasons = [
     ...(youtube ? [] : ["On SoundCloud"]),
-    source
-      ? `From ${source}`
+    best.source
+      ? `From ${best.source}`
       : `Fan upload by ${channel || "an unknown channel"}; no official upload found`,
-    lengthMatches(best.x)
+    lengthMatches(track, best.x)
       ? `same length (${durationLabel(best.x.duration)})`
       : best.x.duration && track.duration
         ? `length differs: ${durationLabel(best.x.duration)} vs ${durationLabel(track.duration)} on ${origin}`
@@ -489,9 +498,126 @@ async function matchQuery(
       matchConfidence: confidence,
       matchReason: reasons.join(" · "),
       matchConfident:
-        Boolean(source) && confidence >= 0.8 && lengthMatches(best.x),
+        Boolean(best.source) &&
+        confidence >= 0.8 &&
+        lengthMatches(track, best.x),
     },
-    link(best.x)!,
+    best.link,
+  );
+}
+async function matchQuery(
+  track: MatchTarget,
+  query: string,
+  origin: string,
+  exclude: string[],
+  signal?: AbortSignal,
+): Promise<CatalogTrack | undefined> {
+  const youtube = !query.startsWith("scsearch");
+  if (query === MUSIC_SEARCH) {
+    // Each read takes seconds, so the top listing is read alone first. A certain
+    // match there needs no comparison with the rest.
+    const [first, ...rest] = await musicListing(track, signal);
+    if (!first) return undefined;
+    const read = (x: Extracted) =>
+      extract(`https://www.youtube.com/watch?v=${x.id}`, false, signal);
+    const lead = await read(first).catch(() => undefined);
+    const top = lead && rankUploads(track, [lead], true, exclude)[0];
+    const quick = top && describeMatch(track, top, true, origin);
+    if (top && top.score >= 0.58 && quick?.matchConfident) return quick;
+    const others = await Promise.allSettled(rest.map(read));
+    const best = rankUploads(
+      track,
+      [
+        ...(lead ? [lead] : []),
+        ...others.flatMap((x) => (x.status === "fulfilled" ? [x.value] : [])),
+      ],
+      true,
+      exclude,
+    )[0];
+    return best && best.score >= 0.58
+      ? describeMatch(track, best, true, origin)
+      : undefined;
+  }
+  const entries = (await extract(query, true, signal)).entries;
+  const best = rankUploads(track, entries || [], youtube, exclude)[0];
+  if (!best || best.score < 0.58) return undefined;
+  return describeMatch(track, best, youtube, origin);
+}
+export interface SourceOption extends CatalogTrack {
+  provider: "YouTube" | "SoundCloud";
+  codec?: string;
+  bitrateKbps?: number;
+  sampleRate?: number;
+  channels?: number;
+}
+const OPTION_FLOOR = 0.4;
+// Every upload worth considering for one track, read in full so each shows the
+// audio it really offers. An upload that cannot be read is not offered at all.
+export async function sourceOptions(
+  track: MatchTarget,
+  origin = "Spotify",
+  signal?: AbortSignal,
+): Promise<SourceOption[]> {
+  const title = track.title.replace(REMASTER_NOTE, "") || track.title;
+  const named = { ...track, title };
+  const search = `${track.artist} ${title}`.trim().replace(/\s+/g, " ");
+  const [music, video, cloud] = await Promise.allSettled([
+    musicCandidates(named, signal),
+    extract(`ytsearch6:${search}`, true, signal),
+    extract(`scsearch4:${search}`, true, signal),
+  ]);
+  const unique = (items: ReturnType<typeof rankUploads>, count: number) =>
+    items
+      .filter(
+        (item, index) =>
+          item.score >= OPTION_FLOOR &&
+          items.findIndex((other) => other.link === item.link) === index,
+      )
+      .slice(0, count);
+  const picks = [
+    ...unique(
+      rankUploads(
+        named,
+        [
+          ...(music.status === "fulfilled" ? music.value : []),
+          ...(video.status === "fulfilled" ? video.value.entries || [] : []),
+        ],
+        true,
+      ),
+      4,
+    ).map((item) => ({ item, youtube: true })),
+    ...unique(
+      rankUploads(
+        named,
+        cloud.status === "fulfilled" ? cloud.value.entries || [] : [],
+        false,
+      ),
+      2,
+    ).map((item) => ({ item, youtube: false })),
+  ];
+  const read = await Promise.allSettled(
+    picks.map(async ({ item, youtube }): Promise<SourceOption> => {
+      const full = await extract(item.link, false, signal);
+      if (Array.isArray(full.formats) && !full.formats.length)
+        throw new Error("No playable audio.");
+      return {
+        ...describeMatch(
+          track,
+          { ...item, x: { ...item.x, ...full } },
+          youtube,
+          origin,
+        ),
+        provider: youtube ? "YouTube" : "SoundCloud",
+        extension: full.ext || "m4a",
+        codec: full.acodec && full.acodec !== "none" ? full.acodec : undefined,
+        bitrateKbps: full.abr || full.tbr || undefined,
+        sampleRate: full.asr || undefined,
+        channels: full.audio_channels || undefined,
+      };
+    }),
+  );
+  return read.flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : [],
   );
 }
 // Search results list uploads that are already downloadable, so the feed

@@ -13,6 +13,7 @@ import {
   type Provider,
   type Track,
 } from "./model";
+import type { SourceQuality } from "./quality";
 
 const wait = (ms: number, signal?: AbortSignal | null) =>
   new Promise<void>((resolve, reject) => {
@@ -276,6 +277,79 @@ export async function resolveLink(
         ? result.notice.slice(0, 300)
         : undefined,
   };
+}
+export interface SourceChoice {
+  provider: "YouTube" | "SoundCloud";
+  title: string;
+  channel: string;
+  reason?: string;
+  confidence?: number;
+  mediaUrl: string;
+  sourceUrl: string;
+  extension: string;
+  quality: SourceQuality;
+}
+// The uploads a track could download from, each with the audio it really offers.
+export async function loadSourceChoices(
+  track: Track,
+  signal: AbortSignal,
+): Promise<SourceChoice[]> {
+  if (!track.fallbackTicket)
+    throw new Error("This track has no other sources to compare.");
+  const response = await directFetch(
+    "/api/sources",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticket: track.fallbackTicket }),
+      signal,
+    },
+    track.transport,
+  );
+  const result = await response.json().catch(() => null);
+  if (!response.ok)
+    throw new Error(result?.detail || "Sources could not be compared right now.");
+  return (Array.isArray(result?.options) ? result.options : []).flatMap(
+    (item: Record<string, any>): SourceChoice[] =>
+      typeof item.mediaUrl === "string" &&
+      item.mediaUrl.startsWith("/api/audio?ticket=") &&
+      typeof item.sourceUrl === "string"
+        ? [
+            {
+              provider:
+                item.provider === "SoundCloud" ? "SoundCloud" : "YouTube",
+              title: String(item.matchedTitle || item.title).slice(0, 300),
+              channel: String(item.matchedChannel || "").slice(0, 200),
+              reason:
+                typeof item.matchReason === "string"
+                  ? item.matchReason.slice(0, 300)
+                  : undefined,
+              confidence:
+                typeof item.matchConfidence === "number"
+                  ? item.matchConfidence
+                  : undefined,
+              mediaUrl: item.mediaUrl,
+              sourceUrl: item.sourceUrl,
+              extension: /^[a-z0-9]{1,5}$/.test(item.extension)
+                ? item.extension
+                : "m4a",
+              quality: {
+                codec: typeof item.codec === "string" ? item.codec : undefined,
+                bitrateKbps:
+                  typeof item.bitrateKbps === "number"
+                    ? item.bitrateKbps
+                    : undefined,
+                sampleRate:
+                  typeof item.sampleRate === "number"
+                    ? item.sampleRate
+                    : undefined,
+                channels:
+                  typeof item.channels === "number" ? item.channels : undefined,
+              },
+            },
+          ]
+        : [],
+  );
 }
 export interface AudioInput {
   blob: Blob;

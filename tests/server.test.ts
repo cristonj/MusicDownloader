@@ -12,7 +12,8 @@ import { providerFor } from "../src/lib/model";
 import { CHUNK_BYTES, hlsManifest, mediaChunk } from "../src/server/media";
 import { mediaFetch, publicFetch } from "../src/server/upstream";
 import { extract } from "../src/server/extractor";
-import { searchTracks } from "../src/server/spotify-search";
+import { commandChannel, searchTracks } from "../src/server/spotify-search";
+import { discoverTrack, readDiscoverPage } from "../src/server/soundcloud";
 import { POST as resolve } from "../src/app/api/resolve/route";
 import { POST as lookup } from "../src/app/api/lookup/route";
 import { POST as feed } from "../src/app/api/feed/route";
@@ -1055,10 +1056,7 @@ describe("service feeds", () => {
       sourceUrl: "https://soundcloud.com/artist/track",
     });
   });
-  it("says which services publish no chart and which have no feed at all", async () => {
-    const soundcloud = await ask("SoundCloud");
-    expect(soundcloud.status).toBe(422);
-    expect((await soundcloud.json()).detail).toMatch(/no public chart/);
+  it("says which services have no feed at all", async () => {
     const amazon = await ask("Amazon Music", "anything");
     expect(amazon.status).toBe(400);
     expect(extract).not.toHaveBeenCalled();
@@ -1235,5 +1233,72 @@ describe("source quality selection", () => {
     expect(vi.mocked(mediaFetch).mock.calls[1][0]).toBe(
       "https://cf-media.sndcdn.com/high.m3u8",
     );
+  });
+});
+
+describe("Spotify browser commands", () => {
+  const socket = () =>
+    ({ send: vi.fn(), close: vi.fn() }) as unknown as WebSocket;
+  it("fails pending commands when the browser closes", async () => {
+    const fake = socket();
+    const pending = commandChannel(fake, 5000).send("Page.navigate");
+    fake.onclose!({} as CloseEvent);
+    await expect(pending).rejects.toThrow("closed");
+  });
+  it("fails a command the browser never answers", async () => {
+    await expect(
+      commandChannel(socket(), 5).send("Runtime.evaluate"),
+    ).rejects.toThrow("stopped responding");
+  });
+});
+describe("SoundCloud discover pages", () => {
+  const page = (tracks: unknown) =>
+    `<script>window.__sc_hydration = ${JSON.stringify([
+      { hydratable: "apiClient", data: { id: "abc" } },
+      { hydratable: "systemPlaylist", data: { title: "All Genres", tracks } },
+    ])};</script>`;
+  it("reads track IDs and the public client ID", () => {
+    expect(readDiscoverPage(page([{ id: 2 }, { id: 1 }, {}]))).toEqual({
+      title: "All Genres",
+      ids: [2, 1],
+      clientId: "abc",
+    });
+    expect(readDiscoverPage("<html></html>")).toBeUndefined();
+  });
+  it("preserves full, preview and blocked public entries for account-aware extraction", () => {
+    const base = {
+      id: 1,
+      title: "Song",
+      duration: 60000,
+      permalink_url: "https://soundcloud.com/a/song",
+      artwork_url: "https://i1.sndcdn.com/artworks-x-large.jpg",
+      user: { username: "A" },
+    };
+    const full = discoverTrack(base)!;
+    expect(full.mediaUrl).toContain("/api/audio?ticket=");
+    expect(full.duration).toBe(60);
+    expect(full.artwork).toContain("-t300x300.jpg");
+    for (const policy of ["SNIP", "BLOCK"]) {
+      const restricted = discoverTrack({ ...base, policy })!;
+      expect(restricted.mediaUrl).toContain("/api/audio?ticket=");
+      expect(restricted.sourceUrl).toBe(base.permalink_url);
+      expect(restricted.matchTicket).toBeUndefined();
+      expect(restricted.fallbackTicket).toBeTruthy();
+    }
+  });
+  it("opens a preview-labelled chart entry through the extractor before choosing a fallback", async () => {
+    const track = discoverTrack({ id: 1, title: "Subscriber song", policy: "SNIP",
+      permalink_url: "https://soundcloud.com/artist/subscriber-song" })!;
+    vi.mocked(extract).mockResolvedValue({
+      title: "Subscriber song", url: "https://cf-media.sndcdn.com/full-track.m4a",
+      ext: "m4a", acodec: "aac", abr: 256, duration: 240,
+    });
+    vi.mocked(mediaFetch).mockResolvedValue(new Response(new Uint8Array([0]), {
+      status: 206, headers: { "Content-Type": "audio/mp4" },
+    }));
+    const response = await audio(new Request(`http://localhost${track.mediaUrl}`));
+    expect(response.status).toBe(200);
+    expect(extract).toHaveBeenCalledWith(track.sourceUrl, false, expect.any(AbortSignal));
+    expect((await response.json()).quality).toMatchObject({ bitrateKbps: 256, duration: 240 });
   });
 });

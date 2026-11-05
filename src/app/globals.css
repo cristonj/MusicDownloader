@@ -2487,3 +2487,283 @@ input[type="checkbox"]:checked {
 .account-row li { margin: 8px 0; }
 .account-row a { text-decoration: underline; }
 .account-setup select { margin: 8px 0; padding: 7px; border-radius: 6px; }
+/* Download settings: the one place file type and quality are chosen. */
+.settings-panel {
+  margin: 16px 0 24px;
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  scroll-margin-top: 16px;
+}
+.settings-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 14px;
+}
+.settings-panel-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.settings-panel-head p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.settings-panel-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+.panel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.panel-field > span:first-child {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.panel-field > small {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.panel-select {
+  position: relative;
+  display: block;
+}
+.panel-select select {
+  appearance: none;
+  width: 100%;
+  height: 40px;
+  padding: 0 34px 0 12px;
+  background: var(--bg);
+  border: 1px solid #cdd3c4;
+  border-radius: 9px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.panel-select select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.panel-select > svg {
+  position: absolute;
+  top: 12px;
+  right: 11px;
+  pointer-events: none;
+  color: var(--muted);
+}
+.panel-fixed {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--bg);
+  border: 1px dashed #cdd3c4;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.export-summary a {
+  color: var(--green);
+  font-weight: 600;
+}
+/* Per-track source choice. */
+.source-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  padding: 3px 8px;
+  background: var(--bg);
+  border: 1px solid #cdd3c4;
+  border-radius: 7px;
+  color: var(--green);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.source-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.source-options {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+}
+.source-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.source-state button {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--green);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.source-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.source-option.chosen {
+  border-color: var(--green);
+}
+.source-option-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.source-option-text strong {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-quality {
+  font-weight: 600;
+  color: var(--green);
+}
+.source-option > a {
+  flex: none;
+  color: var(--muted);
+}
+.source-option > button {
+  flex: none;
+  padding: 5px 12px;
+  background: var(--ink);
+  border: 0;
+  border-radius: 7px;
+  color: var(--surface);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.source-option > button:disabled {
+  background: transparent;
+  color: var(--green);
+  cursor: default;
+}
+.sign-in-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--lime);
+  border-radius: 10px;
+  color: var(--ink);
+}
+.sign-in-bar > div {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.sign-in-bar strong {
+  font-size: 13px;
+}
+.better-steps {
+  display: grid;
+  gap: 16px;
+  margin: 16px 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+.better-steps li > * {
+  display: block;
+  margin-top: 5px;
+}
+.better-steps select {
+  width: 100%;
+  height: 38px;
+  padding: 0 8px;
+}
+.better-steps .primary-button {
+  display: inline-flex;
+}
+.better-service {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.better-service small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.better-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.better-actions a,
+.better-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+}
+.better-good {
+  color: var(--green);
+}
+.better-warn {
+  color: #8a6414;
+}
+.better-bad {
+  color: var(--red);
+}
+.matching-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.extension-value {
+  display: block;
+  overflow-wrap: anywhere;
+  user-select: all;
+  padding: 10px;
+  margin: 10px 0;
+  border: 1px solid var(--border, #444);
+  border-radius: 8px;
+  font-size: 12px;
+}

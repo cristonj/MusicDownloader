@@ -9,7 +9,21 @@ export const browsers = [
   "safari",
 ] as const;
 export type Browser = (typeof browsers)[number];
-export type Accounts = Partial<Record<"youtube" | "soundcloud", Browser>>;
+export type Service = "youtube" | "soundcloud";
+export type Accounts = Partial<Record<Service, Browser | "extension">>;
+const sessions = new Map<Service, { file: string; expires: number }>();
+export function extensionSession(service: Service, file: string, expires: number) {
+  sessions.set(service, { file, expires });
+  revision++;
+}
+export function forgetExtensionSessions() {
+  sessions.clear();
+  revision++;
+}
+export function forgetExtensionSession(service: Service) {
+  sessions.delete(service);
+  revision++;
+}
 let enabled = false;
 let revision = 0;
 export const accountRevision = () => revision;
@@ -31,10 +45,10 @@ export function validateAccounts(value: unknown): Accounts {
   for (const [provider, browser] of Object.entries(value)) {
     if (
       !["youtube", "soundcloud"].includes(provider) ||
-      !browsers.includes(browser as Browser)
+      (browser !== "extension" && !browsers.includes(browser as Browser))
     )
       throw new Error("Choose a supported service and browser.");
-    next[provider as keyof Accounts] = browser as Browser;
+    next[provider as keyof Accounts] = browser as Browser | "extension";
   }
   return next;
 }
@@ -63,5 +77,11 @@ export function accountArgs(url: string): string[] {
         ? "soundcloud"
         : undefined;
   const browser = provider && accounts[provider];
+  if (browser === "extension" && provider) {
+    const session = sessions.get(provider);
+    if (!session || session.expires <= Date.now())
+      throw new Error("Open the MusicDownloader browser extension and click Sync sessions to reconnect this account.");
+    return ["--cookies", session.file, "--no-cache-dir"];
+  }
   return browser ? ["--cookies-from-browser", browser, "--no-cache-dir"] : [];
 }
