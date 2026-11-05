@@ -51,9 +51,9 @@ export function discoverTrack(track: ScTrack): CatalogTrack | undefined {
       uploader: track.user?.username,
       duration: track.duration ? track.duration / 1000 : undefined,
       thumbnail: image?.replace(/-large\.(\w+)$/, "-t300x300.$1"),
-      // SNIP tracks only offer a 30-second preview; BLOCK offers nothing.
-      // No formats sends them to the same matching as DRM-only tracks.
-      formats: ["SNIP", "BLOCK"].includes(track.policy || "") ? [] : undefined,
+      // Public policy says nothing about the connected account's entitlement.
+      // Keep the source for authenticated extraction; the download path falls
+      // back to another upload only if full audio is actually unavailable.
     },
     link,
   );

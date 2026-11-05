@@ -3,6 +3,41 @@ import { open, unlink, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { demoFile } from "../fixture";
 
+test("failed background feed matches can be retried without reloading the feed", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("music-downloader:preferences",
+    JSON.stringify({ feed: true, feedHidden: ["YouTube", "Apple Music", "SoundCloud"] })));
+  await page.route("**/api/feed", (route) => route.fulfill({ json: {
+    title: "Chart", tracks: [{ title: "Retry song", artist: "Artist", matchTicket: "retry-ticket" }],
+  } }));
+  let release!: () => void;
+  const waiting = new Promise<void>((done) => { release = done; });
+  let matches = 0;
+  await page.route("**/api/match", async (route) => {
+    matches++;
+    if (matches === 1) {
+      await waiting;
+      await route.fulfill({ status: 503, json: { detail: "Matching temporarily unavailable" } });
+    } else await route.fulfill({ json: {
+      title: "Retry song", mediaUrl: "/api/audio?ticket=recovered",
+      sourceUrl: "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+    } });
+  });
+  await page.goto("/");
+  const add = page.getByRole("button", { name: "Add Retry song from Spotify", exact: true });
+  await add.click();
+  await expect(page.locator(".track-row")).toContainText("Finding audio");
+  await expect(add).toBeDisabled();
+  release();
+  await expect(page.locator(".track-row")).toContainText("Matching temporarily unavailable");
+  await expect(add).toBeEnabled();
+  await page.getByRole("button", { name: "Remove Retry song", exact: true }).click();
+  await add.click();
+  await expect(page.locator(".track-row")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Download Retry song", exact: true })).toBeEnabled();
+  await expect(add).toBeDisabled();
+  expect(matches).toBe(2);
+});
+
 test("extension setup explains installation, copies pairing details, and shows session connection", async ({ page, context }) => {
   const token = "e".repeat(43);
   let paired = false;

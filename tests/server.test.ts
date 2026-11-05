@@ -1265,7 +1265,7 @@ describe("SoundCloud discover pages", () => {
     });
     expect(readDiscoverPage("<html></html>")).toBeUndefined();
   });
-  it("downloads full tracks and matches preview-only ones", () => {
+  it("preserves full, preview and blocked public entries for account-aware extraction", () => {
     const base = {
       id: 1,
       title: "Song",
@@ -1278,8 +1278,27 @@ describe("SoundCloud discover pages", () => {
     expect(full.mediaUrl).toContain("/api/audio?ticket=");
     expect(full.duration).toBe(60);
     expect(full.artwork).toContain("-t300x300.jpg");
-    const preview = discoverTrack({ ...base, policy: "SNIP" })!;
-    expect(preview.mediaUrl).toBeUndefined();
-    expect(preview.matchTicket).toBeTruthy();
+    for (const policy of ["SNIP", "BLOCK"]) {
+      const restricted = discoverTrack({ ...base, policy })!;
+      expect(restricted.mediaUrl).toContain("/api/audio?ticket=");
+      expect(restricted.sourceUrl).toBe(base.permalink_url);
+      expect(restricted.matchTicket).toBeUndefined();
+      expect(restricted.fallbackTicket).toBeTruthy();
+    }
+  });
+  it("opens a preview-labelled chart entry through the extractor before choosing a fallback", async () => {
+    const track = discoverTrack({ id: 1, title: "Subscriber song", policy: "SNIP",
+      permalink_url: "https://soundcloud.com/artist/subscriber-song" })!;
+    vi.mocked(extract).mockResolvedValue({
+      title: "Subscriber song", url: "https://cf-media.sndcdn.com/full-track.m4a",
+      ext: "m4a", acodec: "aac", abr: 256, duration: 240,
+    });
+    vi.mocked(mediaFetch).mockResolvedValue(new Response(new Uint8Array([0]), {
+      status: 206, headers: { "Content-Type": "audio/mp4" },
+    }));
+    const response = await audio(new Request(`http://localhost${track.mediaUrl}`));
+    expect(response.status).toBe(200);
+    expect(extract).toHaveBeenCalledWith(track.sourceUrl, false, expect.any(AbortSignal));
+    expect((await response.json()).quality).toMatchObject({ bitrateKbps: 256, duration: 240 });
   });
 });

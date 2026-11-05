@@ -172,7 +172,8 @@ export function useLibrary() {
     const controller = new AbortController();
     feedAbort.current.add(controller);
     // A chart row has names but no audio yet. It joins the list straight away
-    // and finds its audio there, so adding never waits on the search.
+    // and finds its audio there. Return the match's outcome so the feed can
+    // offer another Add attempt after failure or cancellation.
     if (!entry.mediaUrl && entry.matchTicket) {
       const id = crypto.randomUUID();
       setTracks((items) => [
@@ -192,14 +193,18 @@ export function useLibrary() {
         },
       ]);
       setNotice(null);
-      void (async () => {
+      return (async () => {
         const slots = matching.current;
         while (slots.active >= 4)
           await new Promise<void>((resolve) => slots.waiting.push(resolve));
         slots.active++;
         try {
+          controller.signal.throwIfAborted();
           const track = await importRow(entry, provider, controller.signal);
+          controller.signal.throwIfAborted();
+          if (!current.current.some((item) => item.id === id)) return false;
           patch(id, { ...track, id });
+          return !track.error;
         } catch (error) {
           if (controller.signal.aborted)
             setTracks((items) => items.filter((t) => t.id !== id));
@@ -207,13 +212,13 @@ export function useLibrary() {
             if (error instanceof HelperRequiredError) setHelperOpen(true);
             patch(id, { status: "error", error: (error as Error).message });
           }
+          return false;
         } finally {
           slots.active--;
           slots.waiting.shift()?.();
           feedAbort.current.delete(controller);
         }
       })();
-      return true;
     }
     try {
       const track = await importRow(entry, provider, controller.signal);
