@@ -652,11 +652,12 @@ export default function Downloader() {
             </div>
             <div className="sign-in-bar">
               <div>
-                <strong>Protected lossless export</strong>
+                <strong>Protected FLAC export</strong>
                 <span>
                   24-bit FLAC at the source rate, with measured peak protection.
                   Larger files; prevents new clipping without another lossy encode.
-                  Existing recording distortion remains.
+                  A FLAC from a lossy stream is not true lossless: missing detail
+                  stays missing and lossless checkers will flag it.
                 </span>
               </div>
               <button
@@ -880,6 +881,25 @@ export default function Downloader() {
                               <ExternalLink size={10} />
                             </a>
                           )
+                        )}
+                        {track.originalDownload &&
+                          track.quality?.format !== "download" && (
+                            <span className="match-reason">
+                              The artist offers the original file. Connect
+                              SoundCloud under Sign in for better audio, then
+                              re-import to use it.
+                            </span>
+                          )}
+                        {track.artistLink && (
+                          <a
+                            className="match-source"
+                            href={track.artistLink.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            Artist: {track.artistLink.label}{" "}
+                            <ExternalLink size={10} />
+                          </a>
                         )}
                         <SourcePicker
                           track={track}

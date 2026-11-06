@@ -3,7 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import type { Track } from "@/lib/model";
 import { analyzeAudio } from "@/lib/audio";
 import { fetchAudio, type AudioInput } from "@/lib/sources";
-import { durationWarning, qualityLabel } from "@/lib/quality";
+import {
+  cutoffLabel,
+  durationWarning,
+  qualityLabel,
+  sourceVerdict,
+} from "@/lib/quality";
 export default function AudioDetails({
   track,
   disabled,
@@ -58,8 +63,18 @@ export default function AudioDetails({
       <summary>
         {qualityLabel(track.quality) || "Audio details"}
         {track.replacement ? " · Replacement source" : ""}
+        {value?.cutoffHz ? ` · Audio ends at ${cutoffLabel(value.cutoffHz)}` : ""}
       </summary>
+      {track.quality?.format === "download" && (
+        <p>Using the artist’s original file from SoundCloud.</p>
+      )}
       {track.quality?.note && <p>{track.quality.note}</p>}
+      {sourceVerdict(value) && <p>{sourceVerdict(value)}</p>}
+      {value?.cutoffHz !== undefined &&
+        value.cutoffHz < 18000 &&
+        track.fallbackTicket && (
+          <p>Another upload may reach higher. Compare them with Change source.</p>
+        )}
       {value && (
         <dl>
           <dt>Measured file</dt>
@@ -72,6 +87,16 @@ export default function AudioDetails({
           <dd>{metric(value.samplePeakDbfs, "dBFS")}</dd>
           <dt>Loudness range</dt>
           <dd>{metric(value.loudnessRangeLu, "LU")}</dd>
+          {value.spectrumMeasured && (
+            <>
+              <dt>Frequency range</dt>
+              <dd>
+                {value.cutoffHz
+                  ? `Ends at ${cutoffLabel(value.cutoffHz)}`
+                  : "No abrupt cutoff"}
+              </dd>
+            </>
+          )}
           <dt>Duration</dt>
           <dd>{value.duration?.toFixed(2)} s</dd>
           {Boolean(value.attenuationDb) && (

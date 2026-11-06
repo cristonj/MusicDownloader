@@ -38,12 +38,15 @@ export interface Extracted {
   formats?: unknown[];
   filesize?: number;
   filesize_approx?: number;
+  // Unix seconds before which YouTube's CDN answers this stream with a 403.
+  available_at?: number;
 }
 async function extractUncached(
   url: string,
   flat = false,
   signal?: AbortSignal,
   profile?: "web_embedded" | "web_safari",
+  anonymous = false,
 ): Promise<Extracted> {
   const youtube =
     /^https:\/\/(?:www\.|music\.|m\.)?(?:youtube\.com|youtu\.be)\//i.test(url);
@@ -86,7 +89,7 @@ async function extractUncached(
   else args.push("--no-playlist");
   if (profile)
     args.push("--extractor-args", `youtube:player_client=${profile}`);
-  const credentials = accountArgs(url);
+  const credentials = anonymous ? [] : accountArgs(url);
   // Source URLs are normalized to www.youtube.com. Explicitly include the
   // Music client for opted-in accounts so normalization cannot hide its
   // entitled formats. Keep yt-dlp's account-aware defaults as well.
@@ -186,6 +189,20 @@ async function extractWithFallbacks(
   try {
     return await extractUncached(url, flat, signal);
   } catch (error) {
+    // A signed-in session can be offered only a protected stream of a track
+    // that is served in the clear without it.
+    if (
+      !signal?.aborted &&
+      error instanceof ExtractionError &&
+      error.category === "DRM_PROTECTED" &&
+      accountArgs(url).length
+    ) {
+      try {
+        return await extractUncached(url, flat, signal, undefined, true);
+      } catch {
+        // Keep the original reason.
+      }
+    }
     if (
       signal?.aborted ||
       !(error instanceof ExtractionError) ||

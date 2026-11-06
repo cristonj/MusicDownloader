@@ -58,6 +58,14 @@ export function localTrack(file: File): Track {
     progress: 0,
   };
 }
+function artistLink(value: unknown): Track["artistLink"] {
+  const link = value as { url?: unknown; label?: unknown } | null | undefined;
+  if (typeof link?.url !== "string" || typeof link.label !== "string")
+    return undefined;
+  return /^https?:\/\//i.test(link.url)
+    ? { url: link.url, label: link.label.slice(0, 60) }
+    : undefined;
+}
 // A resolved track and a feed row become a library track the same way, so a
 // track added from the feed carries the same tickets, labels, and review
 // state as one imported from a link.
@@ -126,6 +134,8 @@ export function trackFromItem(
           : undefined,
     // Every match starts selected; the uncertain ones are flagged in the
     // list rather than left for the listener to tick one by one.
+    originalDownload: item.originalDownload === true || undefined,
+    artistLink: artistLink(item.artistLink),
     selected: !item.error,
     status: item.error ? "error" : "ready",
     error: typeof item.error === "string" ? item.error : undefined,
@@ -288,6 +298,8 @@ export interface SourceChoice {
   sourceUrl: string;
   extension: string;
   quality: SourceQuality;
+  originalDownload?: boolean;
+  artistLink?: Track["artistLink"];
 }
 // The uploads a track could download from, each with the audio it really offers.
 export async function loadSourceChoices(
@@ -333,6 +345,8 @@ export async function loadSourceChoices(
               extension: /^[a-z0-9]{1,5}$/.test(item.extension)
                 ? item.extension
                 : "m4a",
+              originalDownload: item.originalDownload === true || undefined,
+              artistLink: artistLink(item.artistLink),
               quality: {
                 codec: typeof item.codec === "string" ? item.codec : undefined,
                 bitrateKbps:
@@ -399,7 +413,7 @@ export async function fetchAudio(
     failure = error;
   }
   const tried = track.sourceUrl ? [track.sourceUrl] : [];
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < 5; round++) {
     if (
       signal.aborted ||
       !track.fallbackTicket ||
@@ -427,7 +441,7 @@ export async function fetchAudio(
       tried.includes(found.sourceUrl)
     )
       throw new Error(
-        `${message(failure)} ${found?.error || found?.detail || "No other upload of this track was found."}`,
+        `${message(failure)} ${found?.error || found?.detail || "No other upload of this track was found. Try Change source, or add your own file."}`,
       );
     tried.push(found.sourceUrl);
     try {
@@ -477,14 +491,25 @@ async function fetchSourceAudio(
     );
     const result = await response.json();
     const resolved = result.tracks?.[0];
-    if (!response.ok || !resolved?.mediaUrl?.startsWith("/api/audio?ticket="))
+    const playable = resolved?.mediaUrl?.startsWith("/api/audio?ticket=");
+    // The helper signs tickets with its own key, so a search ticket from the
+    // web server would be refused. A DRM-only upload has no audio link, only
+    // that ticket, and still gets its search for another upload.
+    const ticket = resolved?.fallbackTicket || resolved?.matchTicket;
+    if (!response.ok || (!playable && typeof ticket !== "string"))
       throw new Error(
         result.detail ||
           resolved?.error ||
           "Re-import this track with the helper connected.",
       );
     return fetchAudio(
-      { ...track, mediaUrl: resolved.mediaUrl, transport: "helper" },
+      {
+        ...track,
+        mediaUrl: playable ? resolved.mediaUrl : undefined,
+        error: playable ? track.error : resolved.error,
+        fallbackTicket: typeof ticket === "string" ? ticket : undefined,
+        transport: "helper",
+      },
       signal,
       onProgress,
     );
@@ -658,6 +683,44 @@ async function fetchSourceAudio(
     remuxTo: ["m4a", "mp3", "opus", "ogg"].includes(manifest.remuxTo)
       ? manifest.remuxTo
       : undefined,
+  };
+}
+// Enough of a stream to judge its frequency range without downloading each
+// upload being compared: about 75 seconds at the bitrates these services use.
+const SAMPLE_BYTES = 1536 * 1024;
+export async function sampleAudio(
+  mediaUrl: string,
+  transport: Track["transport"],
+  signal: AbortSignal,
+): Promise<{ blob: Blob; extension: string }> {
+  const response = await sourceFetch(mediaUrl, { signal }, transport);
+  const manifest = await response.json().catch(() => null);
+  if (!response.ok || !Array.isArray(manifest?.parts) || !manifest.parts.length)
+    throw new Error(manifest?.detail || "This source could not be sampled.");
+  const pieces: Blob[] = [];
+  let size = 0;
+  for (const part of manifest.parts.slice(0, 40)) {
+    if (typeof part !== "string" || !part.startsWith("/api/media?ticket="))
+      throw new Error("Invalid audio segment.");
+    const chunk = await sourceFetch(
+      part,
+      {
+        signal,
+        headers: { Range: `bytes=0-${SAMPLE_BYTES - size - 1}` },
+      },
+      transport,
+    );
+    if (!chunk.ok) throw new Error("This source could not be sampled.");
+    const blob = await chunk.blob();
+    pieces.push(blob);
+    size += blob.size;
+    if (size >= SAMPLE_BYTES) break;
+  }
+  return {
+    blob: new Blob(pieces),
+    extension: /^[a-z0-9]{1,5}$/.test(manifest.extension)
+      ? manifest.extension
+      : "m4a",
   };
 }
 async function fetchDirectAudio(

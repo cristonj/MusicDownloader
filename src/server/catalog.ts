@@ -9,7 +9,7 @@ import { amazonMusicMetadata } from "./amazon";
 import { allowedSource, HttpError, signTicket } from "./security";
 import { extract, type Extracted } from "./extractor";
 import { spotifyMetadata } from "./spotify";
-import { discoverSet, isDiscoverSet } from "./soundcloud";
+import { artistOffer, discoverSet, isDiscoverSet } from "./soundcloud";
 export interface CatalogTrack {
   title: string;
   // The upload's own title, when a shorter song name is shown instead.
@@ -29,6 +29,8 @@ export interface CatalogTrack {
   matchTicket?: string;
   lookupTicket?: string;
   fallbackTicket?: string;
+  originalDownload?: boolean;
+  artistLink?: { url: string; label: string };
 }
 // The services publish cover art with their listings. A square-ish image of
 // about 300px reads well in the feed without pulling a needless full-size one.
@@ -148,8 +150,19 @@ export function matchScore(
     "reverb",
     "boosted",
     "mashup",
+    // Karaoke labels list guide-vocal and restyled takes under the song's name.
+    "vocal",
+    "metal",
+    "tribute",
   ])
     if (found.has(version) !== target.has(version)) score -= 0.3;
+  if (
+    /karaoke|tribute|party tyme|sing king/i.test(
+      `${candidate.channel || ""} ${candidate.uploader || ""}`,
+    ) &&
+    !/karaoke|tribute/i.test(`${title} ${artist}`)
+  )
+    score -= 0.4;
   if (titleScore < 0.65) score -= 0.4;
   return Math.max(0, Math.min(1, score));
 }
@@ -250,7 +263,14 @@ export async function resolveCatalog(value: string, signal?: AbortSignal) {
   if (!info.entries)
     return {
       title: info.title || "Music",
-      tracks: [catalogTrack(info, url.href)],
+      tracks: [
+        {
+          ...catalogTrack(info, url.href),
+          ...(provider === "SoundCloud"
+            ? await artistOffer(info.webpage_url || url.href, signal)
+            : {}),
+        },
+      ],
     };
   if (info.entries.length > MAX_TRACKS)
     throw new HttpError(422, `Import up to ${MAX_TRACKS} tracks at a time.`);
@@ -613,6 +633,7 @@ export async function sourceOptions(
         bitrateKbps: full.abr || full.tbr || undefined,
         sampleRate: full.asr || undefined,
         channels: full.audio_channels || undefined,
+        ...(youtube ? {} : await artistOffer(item.link, signal)),
       };
     }),
   );

@@ -42,6 +42,10 @@ export interface Track {
   matchReason?: string;
   // Signed names to search other providers with if the source refuses (DRM).
   fallbackTicket?: string;
+  // The artist enabled SoundCloud's original-file download (signed-in only).
+  originalDownload?: boolean;
+  // The artist's own download or store link.
+  artistLink?: { url: string; label: string };
   extension: string;
   selected: boolean;
   status: TrackStatus;
@@ -87,7 +91,7 @@ export const formats: { value: Format; label: string; note: string }[] = [
   { value: "original", label: "Original", note: "Fastest · no conversion" },
   { value: "mp3", label: "MP3", note: "Plays everywhere" },
   { value: "m4a", label: "AAC", note: "Small & crisp" },
-  { value: "flac", label: "FLAC", note: "Lossless" },
+  { value: "flac", label: "FLAC", note: "No further loss" },
   { value: "wav", label: "WAV", note: "Uncompressed" },
   { value: "ogg", label: "OGG", note: "Vorbis audio" },
   { value: "opus", label: "Opus", note: "Efficient audio" },

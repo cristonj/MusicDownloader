@@ -2,8 +2,15 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, LoaderCircle, RefreshCw } from "lucide-react";
 import { providerFor, parseUrl, type Track } from "@/lib/model";
-import { qualityLabel } from "@/lib/quality";
-import { loadSourceChoices, type SourceChoice } from "@/lib/sources";
+import { analyzeSample } from "@/lib/audio";
+import { cutoffLabel, qualityLabel } from "@/lib/quality";
+import {
+  loadSourceChoices,
+  sampleAudio,
+  type SourceChoice,
+} from "@/lib/sources";
+type Range = "measuring" | "failed" | { cutoffHz?: number };
+const NO_CUTOFF = Number.POSITIVE_INFINITY;
 // The upload a track downloads from, and the others it could use instead.
 export default function SourcePicker({
   track,
@@ -17,6 +24,7 @@ export default function SourcePicker({
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<SourceChoice[] | null>(null);
   const [error, setError] = useState("");
+  const [ranges, setRanges] = useState<Record<string, Range>>({});
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
   if (!track.fallbackTicket) return null;
@@ -28,7 +36,32 @@ export default function SourcePicker({
     setError("");
     try {
       const found = await loadSourceChoices(track, controller.signal);
-      if (!controller.signal.aborted) setChoices(found);
+      if (controller.signal.aborted) return;
+      setChoices(found);
+      setRanges(
+        Object.fromEntries(found.map((x) => [x.sourceUrl, "measuring" as const])),
+      );
+      // One at a time: each is a short download and a decode on this device.
+      for (const choice of found) {
+        if (controller.signal.aborted) return;
+        let range: Range = "failed";
+        try {
+          const sample = await sampleAudio(
+            choice.mediaUrl,
+            track.transport,
+            controller.signal,
+          );
+          const result = await analyzeSample(
+            sample.blob,
+            sample.extension,
+            controller.signal,
+          );
+          if (result.measured) range = { cutoffHz: result.cutoffHz };
+        } catch {
+          if (controller.signal.aborted) return;
+        }
+        setRanges((value) => ({ ...value, [choice.sourceUrl]: range }));
+      }
     } catch (reason) {
       if (!controller.signal.aborted) setError((reason as Error).message);
     }
@@ -48,6 +81,8 @@ export default function SourcePicker({
       matchReason: choice.reason,
       matchConfidence: choice.confidence,
       quality: choice.quality,
+      originalDownload: choice.originalDownload,
+      artistLink: choice.artistLink,
       replacement: undefined,
       output: undefined,
       outputName: undefined,
@@ -67,6 +102,28 @@ export default function SourcePicker({
     0,
     ...(choices || []).map((choice) => choice.quality.bitrateKbps || 0),
   );
+  const reach = (range?: Range) =>
+    range && typeof range === "object" ? (range.cutoffHz ?? NO_CUTOFF) : 0;
+  const measuredAll = (choices || []).every(
+    (choice) => ranges[choice.sourceUrl] !== "measuring",
+  );
+  const widest = Math.max(
+    0,
+    ...(choices || []).map((choice) => reach(ranges[choice.sourceUrl])),
+  );
+  const differ = (choices || []).some(
+    (choice) =>
+      reach(ranges[choice.sourceUrl]) > 0 &&
+      reach(ranges[choice.sourceUrl]) !== widest,
+  );
+  const rangeLabel = (range?: Range) =>
+    range === "measuring"
+      ? "Measuring range…"
+      : range === "failed" || !range
+        ? "Range not measured"
+        : range.cutoffHz
+          ? `Audio ends at ${cutoffLabel(range.cutoffHz)}`
+          : "No abrupt cutoff";
   return (
     <div className="source-picker">
       <button
@@ -119,6 +176,23 @@ export default function SourcePicker({
                       choice.quality.bitrateKbps === richest &&
                       " · Highest bitrate here"}
                   </span>
+                  <span className="source-quality">
+                    {rangeLabel(ranges[choice.sourceUrl])}
+                    {measuredAll &&
+                      differ &&
+                      reach(ranges[choice.sourceUrl]) === widest &&
+                      " · Widest range here"}
+                    {choice.originalDownload && " · Artist’s original available"}
+                  </span>
+                  {choice.artistLink && (
+                    <a
+                      href={choice.artistLink.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      Artist: {choice.artistLink.label}
+                    </a>
+                  )}
                 </div>
                 <a
                   href={choice.sourceUrl}

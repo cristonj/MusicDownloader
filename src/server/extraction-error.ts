@@ -57,8 +57,10 @@ export function extractionFailure(
   if (/DRM protected/i.test(stderr))
     return new ExtractionError(
       "DRM_PROTECTED",
-      "This track is DRM-protected at the source and can’t be downloaded.",
-      false,
+      "This upload is DRM-protected, so its audio can’t be saved.",
+      // One YouTube playback client can list only protected formats while
+      // another serves the same recording in the clear.
+      youtube,
       422,
     );
   if (

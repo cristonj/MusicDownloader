@@ -140,6 +140,28 @@ function audioExtension(codec = "aac"): string {
         ? "ogg"
         : "m4a";
 }
+// YouTube holds a new stream back for up to several seconds and refuses it with
+// a 403 until then. Probing early would condemn a perfectly good upload.
+const MAX_STREAM_WAIT_MS = 25000;
+export async function streamReady(availableAt?: number, signal?: AbortSignal) {
+  const delay = availableAt ? availableAt * 1000 + 250 - Date.now() : 0;
+  if (delay <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new HttpError(499, "Download cancelled."));
+    };
+    const timer = setTimeout(
+      () => {
+        signal?.removeEventListener("abort", abort);
+        resolve();
+      },
+      Math.min(delay, MAX_STREAM_WAIT_MS),
+    );
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
+}
 async function playableManifest(
   info: Extracted,
   signal?: AbortSignal,
@@ -147,6 +169,7 @@ async function playableManifest(
   if (info.is_live)
     throw new HttpError(422, "Live streams cannot be downloaded.");
   if (!info.url) throw new HttpError(422, "No audio source was found.");
+  await streamReady(info.available_at, signal);
   const headers = sourceHeaders(info.http_headers);
   let manifest: AudioManifest;
   if (

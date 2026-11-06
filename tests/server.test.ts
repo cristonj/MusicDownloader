@@ -1206,6 +1206,46 @@ describe("bounded audio transport", () => {
     ).toBe(403);
   });
 });
+describe("stream availability", () => {
+  it("waits out YouTube's hold on a new stream before probing it", async () => {
+    const { streamReady } = await import("../src/server/media");
+    const started = Date.now();
+    await streamReady(started / 1000 + 0.2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(200);
+  });
+  it("doesn't wait for a stream that is already available", async () => {
+    const { streamReady } = await import("../src/server/media");
+    const started = Date.now();
+    await streamReady(started / 1000 - 5);
+    await streamReady(undefined);
+    expect(Date.now() - started).toBeLessThan(100);
+  });
+  it("can be cancelled while waiting", async () => {
+    const { streamReady } = await import("../src/server/media");
+    const controller = new AbortController();
+    const waiting = streamReady(Date.now() / 1000 + 20, controller.signal);
+    controller.abort();
+    await expect(waiting).rejects.toThrow("cancelled");
+  });
+});
+describe("matching the same recording", () => {
+  it("doesn't take a karaoke or restyled take for the song", () => {
+    const score = (title: string, channel: string) =>
+      matchScore("Blinding Lights", "The Weeknd", 201, {
+        title,
+        channel,
+        duration: 201,
+      });
+    const real = score("The Weeknd - Blinding Lights", "The Weeknd");
+    expect(score("Blinding Lights (vocal)", "Party Tyme - Topic")).toBeLessThan(
+      0.58,
+    );
+    expect(score("Blinding Lights", "Party Tyme - Topic")).toBeLessThan(real);
+    expect(score("Blinding Lights (Metal Version)", "Someone")).toBeLessThan(
+      real - 0.25,
+    );
+  });
+});
 describe("extraction failures", () => {
   it("explains DRM-protected tracks", async () => {
     const { extractionFailure } = await import(
@@ -1217,6 +1257,14 @@ describe("extraction failures", () => {
         false,
       ).message,
     ).toMatch(/DRM-protected/);
+  });
+  it("lets YouTube try its other playback clients for a protected stream", async () => {
+    const { extractionFailure } = await import(
+      "../src/server/extraction-error"
+    );
+    const stderr = "ERROR: [youtube] x: This video is DRM protected";
+    expect(extractionFailure(stderr, true).retryable).toBe(true);
+    expect(extractionFailure(stderr, false).retryable).toBe(false);
   });
 });
 

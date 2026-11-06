@@ -40,6 +40,60 @@ export function readDiscoverPage(html: string) {
     clientId,
   };
 }
+// What an artist offers beyond the stream. `downloadable` is an original file
+// SoundCloud only hands to a signed-in account; a purchase link is the artist's
+// own, often a free-download gate or a store selling a lossless copy.
+export interface ArtistOffer {
+  originalDownload?: boolean;
+  artistLink?: { url: string; label: string };
+}
+export function readArtistOffer(html: string): ArtistOffer {
+  const script = html.match(
+    /window\.__sc_hydration\s*=\s*(\[.*?\]);\s*<\/script>/s,
+  );
+  if (!script) return {};
+  const sound = (JSON.parse(script[1]) as Hydration).find(
+    (item) => item.hydratable === "sound",
+  )?.data;
+  if (!sound) return {};
+  const offer: ArtistOffer = {};
+  if (sound.downloadable === true && sound.has_downloads_left !== false)
+    offer.originalDownload = true;
+  if (typeof sound.purchase_url === "string") {
+    try {
+      const url = new URL(sound.purchase_url);
+      if (["http:", "https:"].includes(url.protocol))
+        offer.artistLink = {
+          url: url.href,
+          label:
+            typeof sound.purchase_title === "string" &&
+            sound.purchase_title.trim()
+              ? sound.purchase_title.trim().slice(0, 60)
+              : "Artist’s link",
+        };
+    } catch {
+      // A malformed link is simply not offered.
+    }
+  }
+  return offer;
+}
+// Purely informational: a failure here must never affect the import.
+export async function artistOffer(
+  value: string,
+  signal?: AbortSignal,
+): Promise<ArtistOffer> {
+  try {
+    const page = await publicFetch(value, {
+      headers: { "User-Agent": BROWSER, Accept: "text/html,*/*" },
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(6000)])
+        : AbortSignal.timeout(6000),
+    });
+    return page.ok ? readArtistOffer(await page.text()) : {};
+  } catch {
+    return {};
+  }
+}
 export function discoverTrack(track: ScTrack): CatalogTrack | undefined {
   const link = track.permalink_url;
   if (!track.title || !link?.startsWith("https://soundcloud.com/"))
