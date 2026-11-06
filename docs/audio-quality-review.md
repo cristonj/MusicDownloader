@@ -89,3 +89,20 @@ Open items: FFmpeg's native AAC scored lowest in null tests (23–42 dB, against
 ## Download integrity, 5 November 2026
 
 Original downloads through the real app were compared with direct `yt-dlp` downloads of one YouTube and one SoundCloud track. Audio packets were identical, and a jump-based detector found no clicks in either copy. The YouTube stream's single Opus packet warning also appears in the direct download, so it comes from the source. Both tracks decode above full scale (+3.16 dB and +1.00 dB), so Original can clip on playback; the protected FLAC default avoids that. The detector does not prove a recording is free of audible distortion.
+
+## Lossless checks and DRM rescue, 5 November 2026
+
+Four real exports flagged by FakinTheFunk were analysed. All were correctly flagged: three decoded Opus files stopped at 20 kHz and one AAC file at 16 kHz. Converting to FLAC cannot change this, so the app now measures each source's frequency range on the device, reports it plainly, and no longer calls a FLAC made from a lossy stream "lossless". The detector read 19.8–20 and 16 kHz on those files, including from 15-second excerpts. An abrupt cutoff is strong evidence, not proof, and its absence does not prove a lossless source.
+
+| Finding | Evidence | Change |
+| --- | --- | --- |
+| YouTube refuses a new stream until its `available_at` time | Live probes returned 403 before that time and 206 after it; waits of about 3–13 s | The server waits before probing. Previously good uploads were reported as rejected, and replacement could reach a karaoke upload |
+| Karaoke and restyled takes could pass as the same recording | "Blinding Lights (vocal)" by Party Tyme was chosen for The Weeknd | Such titles and channels are penalised |
+| Web-signed search tickets were refused by the helper | The helper signs with its own key | The helper's ticket replaces it when a download moves to the helper |
+| A protected stream ended the search too early | YouTube DRM was not retried; signed-in sessions could not fall back | YouTube tries its other clients; a session-only DRM result retries without the session; up to five other uploads are tried |
+
+Live result: `soundcloud.com/theweeknd/blinding-lights`, which SoundCloud offers only with DRM, exported from The Weeknd's own YouTube upload in 33 s at -1.2 dBTP, labelled as a lossy source ending at 19.8 kHz. The app never decrypts DRM; it finds another upload.
+
+Change source now samples about 75 seconds of each upload and shows its measured range. For one test track, SoundCloud uploads ended at 16 kHz and YouTube uploads at 19.8 kHz. The sample is partial, and a different upload can be a different version, so the app recommends rather than switches automatically.
+
+SoundCloud tracks can offer an artist-enabled original (401 without a login) or an artist link such as a free-download page. Both are now shown for single SoundCloud links and in source comparisons, but not yet for playlist rows. Using an original needs a connected SoundCloud account, and that path could not be exercised without a login. An original may itself be lossy.

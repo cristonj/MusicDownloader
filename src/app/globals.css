@@ -2652,6 +2652,9 @@ input[type="checkbox"]:checked {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.source-option-text a {
+  color: var(--green);
+}
 .source-quality {
   font-weight: 600;
   color: var(--green);

@@ -37,6 +37,63 @@ describe("browser/helper transport", () => {
       new Headers(request.mock.calls[0][1]?.headers).get("authorization"),
     ).toBe(`Bearer ${token}`);
   });
+  it("searches with the helper's own ticket when a web-imported upload is DRM-only", async () => {
+    connect();
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, options?: RequestInit) => {
+        if (url.endsWith("/api/resolve"))
+          return Response.json({
+            tracks: [
+              {
+                title: "Locked",
+                error: "SoundCloud doesn’t allow this track (DRM).",
+                matchTicket: "helper-signed",
+              },
+            ],
+          });
+        if (url.endsWith("/api/match")) {
+          bodies.push(JSON.parse(String(options?.body)));
+          return Response.json({
+            mediaUrl: "/api/audio?ticket=other",
+            sourceUrl: "https://www.youtube.com/watch?v=officialaud",
+            matchedTitle: "Locked",
+          });
+        }
+        if (url.includes("/api/audio"))
+          return Response.json({
+            extension: "webm",
+            parts: ["/api/media?ticket=part"],
+          });
+        return new Response("audio", {
+          status: 206,
+          headers: { "content-range": "bytes 0-4/5" },
+        });
+      }),
+    );
+    const result = await fetchAudio(
+      {
+        id: "1",
+        title: "Locked",
+        artist: "",
+        provider: "SoundCloud",
+        mediaUrl: "/api/audio?ticket=web",
+        sourceUrl: "https://soundcloud.com/label/locked",
+        fallbackTicket: "web-signed",
+        extension: "m4a",
+        selected: true,
+        status: "ready",
+        progress: 0,
+      },
+      new AbortController().signal,
+      () => {},
+    );
+    expect(bodies[0].ticket).toBe("helper-signed");
+    expect(result.replacement?.sourceUrl).toBe(
+      "https://www.youtube.com/watch?v=officialaud",
+    );
+  });
   it("proxies helper audio without attempting CORS-blocked CDN requests", async () => {
     connect();
     const request = vi.fn(async (url: string) =>

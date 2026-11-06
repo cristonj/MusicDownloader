@@ -29,6 +29,39 @@ function fakeResult(value: unknown) {
     return child;
   });
 }
+describe("protected streams", () => {
+  it("retries without the session when an account gets only DRM", async () => {
+    vi.mocked(accountArgs).mockReturnValue(["--cookies", "jar"]);
+    spawn.mockImplementation((_binary: string, args: string[]) => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => {
+        if (args.includes("--cookies")) {
+          child.stderr.emit(
+            "data",
+            Buffer.from("ERROR: [soundcloud] 1: This video is DRM protected"),
+          );
+          child.emit("close", 1);
+        } else {
+          child.stdout.emit(
+            "data",
+            Buffer.from(JSON.stringify({ title: "Clear", url: "https://x/a" })),
+          );
+          child.emit("close", 0);
+        }
+      });
+      return child;
+    });
+    const { extract } = await import("../src/server/extractor");
+    await expect(
+      extract("https://soundcloud.com/artist/song"),
+    ).resolves.toMatchObject({ title: "Clear" });
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+});
 describe("fast source lookups", () => {
   it("shares concurrent lookups and reuses single-track metadata for audio", async () => {
     fakeResult({

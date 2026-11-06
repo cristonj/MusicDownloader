@@ -56,6 +56,7 @@ function releaseEngine(engine: FFmpeg, broken: boolean) {
 import {
   parseMeasurement,
   headroomAdjustment,
+  spectralCutoff,
   type AudioMeasurement,
 } from "./quality";
 
@@ -90,6 +91,59 @@ async function measureFile(
     ffmpeg.off("log", listener);
   }
 }
+// Up to two minutes from the middle of the track is plenty to find a cutoff,
+// and keeps a long mix from exhausting memory. It only ever adds information,
+// so a failure leaves the rest of the measurement or export untouched.
+const SPECTRUM_SECONDS = 120;
+async function measureSpectrum(
+  ffmpeg: FFmpeg,
+  file: string,
+  duration: number | undefined,
+  sampleRate: number | undefined,
+): Promise<Pick<AudioMeasurement, "cutoffHz" | "spectrumMeasured">> {
+  if (!sampleRate) return {};
+  try {
+    const start =
+      duration && duration > SPECTRUM_SECONDS
+        ? (duration - SPECTRUM_SECONDS) / 2
+        : 0;
+    const code = await ffmpeg.exec([
+      "-y",
+      ...(start ? ["-ss", start.toFixed(2)] : []),
+      "-i",
+      file,
+      "-map",
+      "0:a:0",
+      "-vn",
+      "-t",
+      String(SPECTRUM_SECONDS),
+      "-ac",
+      "1",
+      "-c:a",
+      "pcm_f32le",
+      "-f",
+      "f32le",
+      "spectrum.pcm",
+    ]);
+    if (code !== 0) return {};
+    const pcm = await ffmpeg.readFile("spectrum.pcm");
+    if (typeof pcm === "string" || pcm.length < 4) return {};
+    const samples = new Float32Array(
+      pcm.buffer.slice(
+        pcm.byteOffset,
+        pcm.byteOffset + (pcm.length & ~3),
+      ) as ArrayBuffer,
+    );
+    return {
+      cutoffHz: spectralCutoff(samples, sampleRate),
+      spectrumMeasured: true,
+    };
+  } catch {
+    return {};
+  } finally {
+    await ffmpeg.deleteFile("spectrum.pcm").catch(() => {});
+  }
+}
 export async function analyzeAudio(
   input: Blob,
   extension: string,
@@ -105,13 +159,61 @@ export async function analyzeAudio(
       `measure.${extension}`,
       new Uint8Array(await input.arrayBuffer()),
     );
-    return await measureFile(ffmpeg, `measure.${extension}`, input.size);
+    const measured = await measureFile(
+      ffmpeg,
+      `measure.${extension}`,
+      input.size,
+    );
+    return {
+      ...measured,
+      sourceCodec: measured.codec,
+      ...(await measureSpectrum(
+        ffmpeg,
+        `measure.${extension}`,
+        measured.duration,
+        measured.sampleRate,
+      )),
+    };
   } catch (error) {
     broken = true;
     throw error;
   } finally {
     signal.removeEventListener("abort", abort);
     await ffmpeg.deleteFile(`measure.${extension}`).catch(() => {});
+    releaseEngine(ffmpeg, broken);
+  }
+}
+// Measures the frequency range of a partial download, for comparing sources.
+export async function analyzeSample(
+  input: Blob,
+  extension: string,
+  signal: AbortSignal,
+): Promise<{ cutoffHz?: number; measured: boolean }> {
+  const ffmpeg = await getEngine(signal, () => {});
+  const name = `sample.${extension}`;
+  let broken = false;
+  const abort = () => ffmpeg.terminate();
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+    await ffmpeg.writeFile(name, new Uint8Array(await input.arrayBuffer()));
+    const info = await measureFile(ffmpeg, name, input.size);
+    const spectrum = await measureSpectrum(
+      ffmpeg,
+      name,
+      undefined,
+      info.sampleRate,
+    );
+    return {
+      cutoffHz: spectrum.cutoffHz,
+      measured: Boolean(spectrum.spectrumMeasured),
+    };
+  } catch (error) {
+    broken = true;
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abort);
+    await ffmpeg.deleteFile(name).catch(() => {});
     releaseEngine(ffmpeg, broken);
   }
 }
@@ -200,6 +302,18 @@ export async function convertAudio(
       throw new Error(
         "Could not measure the source peaks for protected export. Try another source.",
       );
+    // The source's range, before dither adds a noise floor to the output.
+    const sourceInfo = original
+      ? undefined
+      : inputMeasurement || (await measureFile(ffmpeg, inputName, input.size));
+    const sourceSpectrum = sourceInfo
+      ? await measureSpectrum(
+          ffmpeg,
+          inputName,
+          sourceInfo.duration,
+          sourceInfo.sampleRate,
+        )
+      : {};
     let gain = protect
       ? headroomAdjustment(inputMeasurement?.truePeakDbtp, -1.2)
       : 0;
@@ -323,7 +437,13 @@ export async function convertAudio(
       throw new Error(
         "Peak protection could not reach its target. Choose Original or another format.",
       );
-    if (measured) onMeasurement?.({ ...measured, attenuationDb: gain });
+    if (measured)
+      onMeasurement?.({
+        ...measured,
+        attenuationDb: gain,
+        sourceCodec: sourceInfo?.codec,
+        ...sourceSpectrum,
+      });
     if (!result) throw new Error("The audio engine returned no audio.");
     const types: Record<string, string> = {
       mp3: "audio/mpeg",
